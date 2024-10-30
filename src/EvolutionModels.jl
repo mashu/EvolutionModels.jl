@@ -18,11 +18,15 @@ export EvolutionModel, DNAModel, ProteinModel, Model
 # Export model types
 export JC69Model, HKY85Model, GTRModel, WAGModel, LGModel
 
+# Export constants
+export STANDARD_DNA, STANDARD_AA
+
 # Export functions
 export create_model
 export transition_probability_matrix
 export stationary_frequencies, rate_matrix
 export evolve_sequence, sequence_likelihood
+export symbols  # Export symbols function
 
 # Interface functions
 """

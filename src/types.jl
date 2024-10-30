@@ -7,6 +7,8 @@ const STANDARD_AA = (
     AA_L, AA_K, AA_M, AA_F, AA_P, AA_S, AA_T, AA_W, AA_Y, AA_V
 )
 
+export STANDARD_DNA, STANDARD_AA
+
 """
     SequenceType
 
@@ -70,4 +72,3 @@ struct Model{S<:SequenceType}
     Q::Matrix{Float64}            # Generator matrix
     params::Dict{Symbol,Any}      # Model-specific parameters
 end
-

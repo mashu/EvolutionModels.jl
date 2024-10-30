@@ -11,7 +11,8 @@ function evolve_sequence(
     rng::AbstractRNG=Random.GLOBAL_RNG
 )
     P = transition_probability_matrix(model, t)
-    result = LongDNA{4}(length(seq))
+    # Initialize with first sequence character
+    result = LongDNA{4}([seq[1] for _ in 1:length(seq)])
     
     for (i, nt) in enumerate(seq)
         if nt in STANDARD_DNA
@@ -36,8 +37,8 @@ function evolve_sequence(
     rng::AbstractRNG=Random.GLOBAL_RNG
 )
     P = transition_probability_matrix(model, t)
-    # Create an empty amino acid sequence with same length
-    result = LongAA([AA_A for _ in 1:length(seq)])  # Initialize with temporary values
+    # Initialize with first sequence character
+    result = LongAA([seq[1] for _ in 1:length(seq)])
     
     for (i, aa) in enumerate(seq)
         if aa in STANDARD_AA
