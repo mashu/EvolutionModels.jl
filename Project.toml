@@ -1,0 +1,13 @@
+name = "EvolutionModels"
+uuid = "82fd434d-99cf-4c3d-8b70-d47173cbd781"
+authors = ["Mateusz Kaduk <mateusz.kaduk@gmail.com> and contributors"]
+version = "0.0.1"
+
+[compat]
+julia = "1.10"
+
+[extras]
+Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+
+[targets]
+test = ["Test"]
