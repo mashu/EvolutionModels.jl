@@ -5,6 +5,13 @@ using BioSequences
 using Random
 using StatsBase
 
+# Extension interface functions that will be implemented by extensions
+function read_alignment end
+function compute_distances end
+
+# Export the interface functions
+export read_alignment, compute_distances
+
 include("types.jl")
 include("utils.jl")
 include("parametric.jl")
