@@ -1,5 +1,33 @@
 """
-Create a JC69 model
+    create_model(::Type{JC69Model}, μ::Float64) -> Model{DNAType}
+
+Create a Jukes-Cantor (1969) model of DNA evolution.
+
+The JC69 model assumes:
+- Equal base frequencies (π = 0.25 for all bases)
+- Equal substitution rates between all nucleotides
+- Single parameter μ controlling overall mutation rate
+
+# Arguments
+- `μ::Float64`: Overall mutation rate scaling factor (must be positive)
+
+# Returns
+- `Model{DNAType}`: A JC69 model with rate matrix Q where:
+  * qᵢⱼ = μ/4 for i ≠ j (off-diagonal elements)
+  * qᵢᵢ = -3μ/4 (diagonal elements)
+
+# Example
+```julia
+# Create JC69 model with rate 0.1
+model = create_model(JC69Model, 0.1)
+
+# Access model properties
+π = stationary_frequencies(model)  # All 0.25
+R = rate_matrix(model)  # Symmetric rate matrix
+```
+
+# References
+Jukes, T.H. and Cantor, C.R. (1969). Evolution of Protein Molecules.
 """
 function create_model(::Type{JC69Model}, μ::Float64)
     μ > 0 || throw(ArgumentError("μ must be positive"))
@@ -18,7 +46,36 @@ function create_model(::Type{JC69Model}, μ::Float64)
 end
 
 """
-Create an HKY85 model
+    create_model(::Type{HKY85Model}, μ::Float64, π::Vector{Float64}, κ::Float64) -> Model{DNAType}
+
+Create a Hasegawa-Kishino-Yano (1985) model of DNA evolution.
+
+The HKY85 model features:
+- Arbitrary base frequencies π
+- Different rates for transitions (A↔G, C↔T) vs transversions
+- Rate ratio κ between transitions and transversions
+
+# Arguments
+- `μ::Float64`: Overall mutation rate scaling factor (must be positive)
+- `π::Vector{Float64}`: Vector of base frequencies [πA, πC, πG, πT] (must sum to 1)
+- `κ::Float64`: Transition/transversion rate ratio (must be positive)
+
+# Returns
+- `Model{DNAType}`: An HKY85 model with rate matrix Q where:
+  * qᵢⱼ = μκπⱼ for transitions
+  * qᵢⱼ = μπⱼ for transversions
+  * qᵢᵢ = -∑ⱼ≠ᵢ qᵢⱼ
+
+# Example
+```julia
+# Create HKY85 model with unequal base frequencies
+π = [0.3, 0.2, 0.2, 0.3]  # A,C,G,T frequencies
+model = create_model(HKY85Model, 0.1, π, 2.0)  # κ=2 means transitions occur 2× faster
+```
+
+# References
+Hasegawa, M., Kishino, H., and Yano, T. (1985). Dating of the human-ape splitting
+by a molecular clock of mitochondrial DNA. J. Mol. Evol., 22(2):160-174.
 """
 function create_model(::Type{HKY85Model}, μ::Float64, π::Vector{Float64}, κ::Float64)
     μ > 0 || throw(ArgumentError("μ must be positive"))
@@ -47,7 +104,40 @@ function create_model(::Type{HKY85Model}, μ::Float64, π::Vector{Float64}, κ::
 end
 
 """
-Create a GTR model
+    create_model(::Type{GTRModel}, μ::Float64, π::Vector{Float64}, rates::Matrix{Float64}) -> Model{DNAType}
+
+Create a General Time-Reversible (GTR) model of DNA evolution.
+
+The GTR model is the most general neutral, independent sites, reversible model:
+- Arbitrary base frequencies π
+- Arbitrary symmetric rate matrix
+- Satisfies detailed balance: πᵢqᵢⱼ = πⱼqⱼᵢ
+
+# Arguments
+- `μ::Float64`: Overall mutation rate scaling factor (must be positive)
+- `π::Vector{Float64}`: Vector of base frequencies [πA, πC, πG, πT] (must sum to 1)
+- `rates::Matrix{Float64}`: 4×4 symmetric matrix of relative substitution rates
+
+# Returns
+- `Model{DNAType}`: A GTR model with rate matrix Q = μR⋅diag(π) where:
+  * R is the symmetric rate matrix
+  * qᵢⱼ = μrᵢⱼπⱼ for i ≠ j
+  * qᵢᵢ = -∑ⱼ≠ᵢ qᵢⱼ
+
+# Example
+```julia
+# Create GTR model with custom rates
+π = [0.3, 0.2, 0.2, 0.3]  # Base frequencies
+rates = [0.0 1.0 2.0 1.0;  # Symmetric rate matrix
+         1.0 0.0 1.0 2.0;
+         2.0 1.0 0.0 1.0;
+         1.0 2.0 1.0 0.0]
+model = create_model(GTRModel, 0.1, π, rates)
+```
+
+# References
+Tavaré, S. (1986). Some probabilistic and statistical problems in the analysis
+of DNA sequences. Lectures on Mathematics in the Life Sciences, 17:57-86.
 """
 function create_model(::Type{GTRModel}, μ::Float64, π::Vector{Float64}, rates::Matrix{Float64})
     μ > 0 || throw(ArgumentError("μ must be positive"))
