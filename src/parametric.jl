@@ -57,7 +57,7 @@ The HKY85 model features:
 
 # Arguments
 - `μ::Float64`: Overall mutation rate scaling factor (must be positive)
-- `π::Vector{Float64}`: Vector of base frequencies [πA, πC, πG, πT] (must sum to 1)
+- `π::Vector{Float64}`: Vector of base frequencies [πA, πC, πG, πT], must sum to 1
 - `κ::Float64`: Transition/transversion rate ratio (must be positive)
 
 # Returns
@@ -115,7 +115,7 @@ The GTR model is the most general neutral, independent sites, reversible model:
 
 # Arguments
 - `μ::Float64`: Overall mutation rate scaling factor (must be positive)
-- `π::Vector{Float64}`: Vector of base frequencies [πA, πC, πG, πT] (must sum to 1)
+- `π::Vector{Float64}`: Vector of base frequencies [πA, πC, πG, πT], must sum to 1
 - `rates::Matrix{Float64}`: 4×4 symmetric matrix of relative substitution rates
 
 # Returns
