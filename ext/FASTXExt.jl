@@ -4,9 +4,9 @@ using FASTX
 using BioSequences
 using Optim
 
-import EvolutionModels: Model, sequence_likelihood, read_alignment, compute_distances
+import EvolutionModels: Model, sequence_likelihood, read_alignment, compute_distances, is_transition
 import EvolutionModels: JC69Model, HKY85Model, GTRModel
-
+import EvolutionModels: num_parameters, STANDARD_DNA
 export LabeledAlignment
 
 # Custom error types for better error handling
@@ -105,63 +105,187 @@ function read_alignment(fasta_file::String)
 end
 
 """
+    compute_analytical_distance(model::Model, seq1::LongSequence, seq2::LongSequence) -> Float64
+
+Compute analytical distance between two sequences based on the model type.
+Returns NaN if the distance cannot be computed.
+"""
+function compute_analytical_distance(model::Model, seq1::LongSequence, seq2::LongSequence)
+    # Count sites and patterns, ignoring non-standard nucleotides
+    total = 0
+    S = 0  # transitions
+    V = 0  # transversions
+
+    for (x, y) in zip(seq1, seq2)
+        if x in STANDARD_DNA && y in STANDARD_DNA
+            total += 1
+            if x != y
+                if is_transition(x, y)
+                    S += 1
+                else
+                    V += 1
+                end
+            end
+        end
+    end
+
+    # Convert to proportions
+    P = S / total  # proportion of transitions
+    Q = V / total  # proportion of transversions
+
+    # Get model type from params
+    model_name = get(model.params, :model, nothing)
+
+    if model_name == "JC69"
+        # JC69: d = -3/4 * ln(1 - 4/3 * p), where p = (P + Q)
+        p = (P + Q)
+        return p >= 0.75 ? Inf : -3/4 * log(1 - 4/3 * p)
+
+    elseif model_name == "K2P"  # Kimura 2-Parameter
+        # K2P: d = -1/2 * ln(1 - 2P - Q) - 1/4 * ln(1 - 2Q)
+        if 2P + Q >= 1 || 2Q >= 1
+            return Inf
+        end
+        return -1/2 * log(1 - 2P - Q) - 1/4 * log(1 - 2Q)
+
+    elseif model_name == "HKY85"
+        # For HKY85, use the modified formula taking into account base frequencies
+        π = model.π  # stationary frequencies
+        πY = π[2] + π[4]  # πC + πT
+        πR = π[1] + π[3]  # πA + πG
+
+        # Modified formula based on Felsenstein (2004)
+        if 2P + Q >= 1 || 2Q >= 1
+            return Inf
+        end
+
+        k = get(model.params, :kappa, 1.0)  # transition/transversion rate ratio
+
+        return -2 * (πR * πY * k + πR * πY) * log(1 - P/(2πR * πY) - Q/(2πR * πY)) -
+               2 * (πR * πY) * log(1 - Q/(2πR * πY))
+
+    elseif model_name == "GTR"
+        # For GTR, fall back to ML estimation as there's no simple analytical formula
+        return NaN
+
+    else
+        error("Unsupported model for analytical distance: $model_name")
+    end
+end
+
+"""
     compute_distances(model::Model, aln::LabeledAlignment;
+                     method::Symbol=:analytical,
                      initial_scale::Float64=0.1,
                      max_scale::Float64=100.0) -> NamedTuple
 
-Compute pairwise distances between sequences under the given model.
+Compute pairwise distances between sequences.
+
+# Arguments
+- `model::Model`: Evolution model (DNA or protein)
+- `aln::LabeledAlignment`: Aligned sequences with labels
+- `method::Symbol=:analytical`: Method to use (:analytical, :ml, or :auto)
+- `initial_scale::Float64=0.1`: Initial guess for ML optimization
+- `max_scale::Float64=100.0`: Maximum allowed distance
+
+# Returns
+NamedTuple containing:
+- `distances::Matrix{Float64}`: Distance matrix
+- `labels::Vector{String}`: Sequence labels
+
+Note: :auto will use analytical formulas when available, falling back to ML otherwise
 """
 function compute_distances(
     model::Model,
     aln::LabeledAlignment;
+    method::Symbol=:analytical,
     initial_scale::Float64=0.1,
     max_scale::Float64=100.0
 )
     n = length(aln.sequences)
     D = zeros(n, n)
 
-    # Get number of parameters for this model
-    n_params = num_parameters(model)
+    # Determine if analytical method is available
+    model_name = get(model.params, :model, nothing)
+    has_analytical = model_name in ("JC69", "K2P", "HKY85")
 
-    # For single-parameter models
-    if n_params == 1
-        Threads.@threads for i in 1:n
-            for j in i+1:n
-                # Define negative log-likelihood function for optimization
-                function f(t)
-                    if t < 0 || t > max_scale
-                        return Inf
-                    end
-                    try
-                        return -sequence_likelihood(model, aln.sequences[i], aln.sequences[j], t)
-                    catch
-                        return Inf
-                    end
-                end
-
-                # Run optimization using Brent's method
-                res = try
-                    optimize(t -> f(first(t)), [0.0], [max_scale], [initial_scale])
-                catch e
-                    @warn "Optimization failed for sequences $(aln.labels[i]) and $(aln.labels[j]): $(sprint(showerror, e))"
-                    nothing
-                end
-
-                # Extract result
-                if res !== nothing && Optim.converged(res)
-                    D[i,j] = D[j,i] = Optim.minimizer(res)[1]
-                else
-                    D[i,j] = D[j,i] = NaN
-                end
-            end
-        end
-    else
-        # For multi-parameter models
-        @warn "Multi-parameter optimization not yet implemented for model type: $(model.params[:model])"
-        D .= NaN
+    # Validate method choice
+    if method == :analytical && !has_analytical
+        error("Analytical method not available for model: $model_name")
     end
 
-    return (distances=D, labels=aln.labels)
+    # Choose method
+    use_ml = if method == :auto
+        !has_analytical
+    elseif method == :analytical
+        false
+    elseif method == :ml
+        true
+    else
+        error("Unknown method: $method")
+    end
+
+    if use_ml
+        # ML implementation
+        n_params = num_parameters(model)
+
+        if n_params == 1
+            opt_options = Optim.Options(
+                x_tol = 1e-8,
+                f_tol = 1e-8,
+                iterations = 1000
+            )
+
+            Threads.@threads for i in 1:n
+                for j in i+1:n
+                    # Define negative log-likelihood function for optimization
+                    function f(t)
+                        if t < 0 || t > max_scale
+                            return Inf
+                        end
+                        try
+                            return -sequence_likelihood(model, aln.sequences[i], aln.sequences[j], first(t))
+                        catch
+                            return Inf
+                        end
+                    end
+
+                    # Run optimization
+                    res = try
+                        optimize(f, [0.0], [max_scale], [initial_scale])
+                    catch e
+                        @warn "Optimization failed for sequences $(aln.labels[i]) and $(aln.labels[j]): $(sprint(showerror, e))"
+                        nothing
+                    end
+
+                    # Extract result
+                    if res !== nothing && Optim.converged(res)
+                        D[i,j] = D[j,i] = Optim.minimizer(res)[1]
+                    else
+                        D[i,j] = D[j,i] = NaN
+                    end
+                end
+            end
+        else
+            @warn "Multi-parameter ML optimization not yet implemented for model type: $model_name"
+            D .= NaN
+        end
+    else
+        # Analytical formula implementation
+        Threads.@threads for i in 1:n
+            for j in i+1:n
+                D[i,j] = D[j,i] = compute_analytical_distance(model, aln.sequences[i], aln.sequences[j])
+            end
+        end
+    end
+
+    # Add computation method to return value for reference
+    return (
+        distances=D,
+        labels=aln.labels,
+        method=use_ml ? :ml : :analytical,
+        model=model_name
+    )
 end
 
 # Helper function to determine number of parameters

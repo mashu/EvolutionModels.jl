@@ -8,9 +8,10 @@ using StatsBase
 # Extension interface functions that will be implemented by extensions
 function read_alignment end
 function compute_distances end
+function num_parameters end
 
 # Export the interface functions
-export read_alignment, compute_distances
+export read_alignment, compute_distances, num_parameters
 
 include("types.jl")
 include("utils.jl")

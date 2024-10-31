@@ -6,6 +6,8 @@
 
 A Julia package implementing continuous-time Markov models for molecular sequence evolution. Provides both parametric nucleotide models (JC69, HKY85, GTR) and empirical amino acid models (WAG, LG) with simulation and likelihood computation capabilities.
 
+> ⚠️ **Note: This package is currently under development and extension (loaded with FASTX and Optim) is experimental. Use with caution in production environments.**
+
 ## Features
 
 - Nucleotide substitution models: JC69, HKY85, GTR
