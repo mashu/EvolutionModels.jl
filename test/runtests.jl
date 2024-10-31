@@ -5,22 +5,24 @@ using LinearAlgebra
 using Random
 import EvolutionModels: symbols
 import EvolutionModels: is_transition
+using FASTX
+using Optim
 
 # Helper function to check if matrix is symmetric in off-diagonal elements
-is_symmetric_off_diagonal(matrix) = all(matrix[i, j] ≈ matrix[j, i] 
+is_symmetric_off_diagonal(matrix) = all(matrix[i, j] ≈ matrix[j, i]
     for i in 1:size(matrix, 1), j in 1:size(matrix, 2) if i != j)
 
 @testset verbose=true "EvolutionModels.jl" begin
     @testset "Types" begin
         @test length(DNAType()) == 4
         @test length(ProteinType()) == 20
-        
+
         dna_type = DNAType()
         protein_type = ProteinType()
-        
+
         @test length(symbols(dna_type)) == 4
         @test length(symbols(protein_type)) == 20
-        
+
         @test all(nt isa DNA for nt in symbols(dna_type))
         @test all(aa isa AminoAcid for aa in symbols(protein_type))
     end
@@ -84,13 +86,13 @@ is_symmetric_off_diagonal(matrix) = all(matrix[i, j] ≈ matrix[j, i]
                     1.0 0.0 1.0 2.0;
                     2.0 1.0 0.0 1.0;
                     1.0 2.0 1.0 0.0]
-            
+
             model = create_model(GTRModel, μ, π, rates)
 
             @test model.μ == μ
             @test model.π == π
             @test model.R == rates .* μ
-            
+
             # Test Q matrix properties
             @test all(isapprox.(sum(model.Q, dims=2), 0.0, atol=1e-14))
             @test is_symmetric_off_diagonal(model.Q ./ model.π')
@@ -105,11 +107,11 @@ is_symmetric_off_diagonal(matrix) = all(matrix[i, j] ≈ matrix[j, i]
             @test model.μ == μ
             @test length(model.π) == 20
             @test isapprox(sum(model.π), 1.0, atol=1e-14)
-            
+
             # Test matrix dimensions
             @test size(model.R) == (20, 20)
             @test size(model.Q) == (20, 20)
-            
+
             # Test basic matrix properties
             @test all(diag(model.R) .== 0.0)
             @test issymmetric(model.R)
@@ -124,11 +126,11 @@ is_symmetric_off_diagonal(matrix) = all(matrix[i, j] ≈ matrix[j, i]
             @test model.μ == μ
             @test length(model.π) == 20
             @test isapprox(sum(model.π), 1.0, atol=1e-14)
-            
+
             # Test matrix dimensions
             @test size(model.R) == (20, 20)
             @test size(model.Q) == (20, 20)
-            
+
             # Test basic matrix properties
             @test all(diag(model.R) .== 0.0)
             @test issymmetric(model.R)
@@ -158,11 +160,11 @@ is_symmetric_off_diagonal(matrix) = all(matrix[i, j] ≈ matrix[j, i]
 
     @testset "Evolution" begin
         Random.seed!(42)  # For reproducibility
-        
+
         @testset "DNA Evolution" begin
             model = create_model(JC69Model, 0.1)
             seq = dna"ATCGATCGATCG"
-            
+
             evolved = evolve_sequence(model, seq, 1.0)
             @test length(evolved) == length(seq)
             @test all(nt in STANDARD_DNA for nt in evolved)
@@ -186,7 +188,7 @@ is_symmetric_off_diagonal(matrix) = all(matrix[i, j] ≈ matrix[j, i]
         @testset "Protein Evolution" begin
             model = create_model(WAGModel, 0.1)
             seq = aa"ARNDCQEGHILKMFPSTWYV"
-            
+
             evolved = evolve_sequence(model, seq, 1.0)
             @test length(evolved) == length(seq)
             @test all(aa in STANDARD_AA for aa in evolved)
@@ -254,12 +256,68 @@ is_symmetric_off_diagonal(matrix) = all(matrix[i, j] ≈ matrix[j, i]
         # Test transition probability matrix
         P_dna = transition_probability_matrix(model_dna, 1.0)
         P_protein = transition_probability_matrix(model_protein, 1.0)
-        
+
         @test size(P_dna) == (4, 4)
         @test size(P_protein) == (20, 20)
         @test all(isapprox.(sum(P_dna, dims=2), 1.0))
         @test all(isapprox.(sum(P_protein, dims=2), 1.0))
         @test all(P_dna .>= 0.0)
         @test all(P_protein .>= 0.0)
+    end
+
+    @testset "FASTX Extension" begin
+        # Create a temporary FASTA file
+        test_fasta = tempname() * ".fasta"
+        open(test_fasta, "w") do io
+            write(io, """>seq1
+ATCGATCG
+>seq2
+ATCGATCC
+>seq3
+ATCGATCT
+""")
+        end
+
+        try
+            # Test read_alignment
+            aln = read_alignment(test_fasta)
+            @test length(aln.sequences) == 3
+            @test length(aln.labels) == 3
+            @test aln.length == 8
+            @test aln.labels == ["seq1", "seq2", "seq3"]
+            @test all(seq isa LongDNA{4} for seq in aln.sequences)
+
+            # Test compute_distances with JC69 model
+            model = create_model(JC69Model, 0.1)
+            result = compute_distances(model, aln)
+
+            # Test result structure
+            @test result isa NamedTuple
+            @test haskey(result, :distances)
+            @test haskey(result, :labels)
+            @test size(result.distances) == (3,3)
+            @test result.labels == aln.labels
+
+            # Test distance matrix properties
+            D = result.distances
+            @test issymmetric(D)
+            @test all(isapprox.(diag(D), 0.0, atol=1e-10))
+            @test all(D[i,j] > 0 for i in 1:3 for j in i+1:3)  # Off-diagonal elements should be positive
+
+            # Test error handling
+            @test_throws SystemError read_alignment("nonexistent.fasta")
+
+            # Test unequal sequence lengths
+            unequal_fasta = tempname() * ".fasta"
+            open(unequal_fasta, "w") do io
+                write(io, """>seq1
+ATCG
+>seq2
+ATCGATCG
+""")
+            end
+        finally
+            rm(test_fasta)
+        end
     end
 end

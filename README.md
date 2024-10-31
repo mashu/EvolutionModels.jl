@@ -12,7 +12,7 @@ A Julia package implementing continuous-time Markov models for molecular sequenc
 - Amino acid substitution models: WAG, LG
 - Sequence evolution simulation
 - Likelihood computation
-- Distance matrix computation (requires FASTX.jl)
+- Distance matrix computation (requires FASTX.jl and Optim.jl)
 - Integration with BioSequences.jl
 
 ## Installation
@@ -41,21 +41,25 @@ logL = sequence_likelihood(model, seq, evolved, 1.0)
 
 ## Computing Distances from FASTA Alignment
 
-The package can compute pairwise evolutionary distances from multiple sequence alignments in FASTA format. This functionality requires FASTX.jl:
+The package can compute pairwise evolutionary distances from multiple sequence alignments in FASTA format. This functionality requires both FASTX.jl and Optim.jl:
 
 ```julia
 using EvolutionModels
 using FASTX
+using Optim
 
 # Read alignment
 seqs = read_alignment("alignment.fasta")
 
 # Create model and compute distances
 model = create_model(JC69Model, 0.1)
-D = compute_distances(model, seqs)
+result = compute_distances(model, seqs)
+
+# Print the distance matrix
+print_distance_matrix(result)
 ```
 
-The resulting distance matrix `D` contains maximum likelihood estimates of evolutionary times between sequences under the specified model. This can be used for:
+The resulting distance matrix contains maximum likelihood estimates of evolutionary times between sequences under the specified model. This can be used for:
 - Phylogenetic tree reconstruction
 - Sequence clustering
 - Evolutionary rate estimation
@@ -63,3 +67,4 @@ The resulting distance matrix `D` contains maximum likelihood estimates of evolu
 ## License
 
 MIT
+
