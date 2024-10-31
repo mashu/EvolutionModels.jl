@@ -114,16 +114,6 @@ model = create_model(GTRModel, 0.1, π, rates)
 
 ## API Reference
 
-```@docs
-create_model
-evolve_sequence
-sequence_likelihood
-compute_distances
-print_distance_matrix
-GTRRates
-Model
-JC69Model
-HKY85Model
-GTRModel
+```@autodocs
+Modules = [EvolutionModels]
 ```
-
