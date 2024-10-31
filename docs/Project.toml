@@ -1,3 +1,6 @@
 [deps]
 Documenter = "e30172f5-a6a5-5a46-863b-614d45cd2de4"
 EvolutionModels = "82fd434d-99cf-4c3d-8b70-d47173cbd781"
+FASTX = "c2308a5c-f048-11e8-3e8a-31650f418d12"
+Optim = "429524aa-4258-5aef-a3af-852621145aeb"
+
