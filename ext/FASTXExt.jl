@@ -178,22 +178,6 @@ end
                      method::Symbol=:analytical,
                      initial_scale::Float64=0.1,
                      max_scale::Float64=100.0) -> NamedTuple
-
-Compute pairwise distances between sequences.
-
-# Arguments
-- `model::Model`: Evolution model (DNA or protein)
-- `aln::LabeledAlignment`: Aligned sequences with labels
-- `method::Symbol=:analytical`: Method to use (:analytical, :ml, or :auto)
-- `initial_scale::Float64=0.1`: Initial guess for ML optimization
-- `max_scale::Float64=100.0`: Maximum allowed distance
-
-# Returns
-NamedTuple containing:
-- `distances::Matrix{Float64}`: Distance matrix
-- `labels::Vector{String}`: Sequence labels
-
-Note: :auto will use analytical formulas when available, falling back to ML otherwise
 """
 function compute_distances(
     model::Model,
@@ -230,29 +214,23 @@ function compute_distances(
         n_params = num_parameters(model)
 
         if n_params == 1
-            opt_options = Optim.Options(
-                x_tol = 1e-8,
-                f_tol = 1e-8,
-                iterations = 1000
-            )
-
             Threads.@threads for i in 1:n
                 for j in i+1:n
                     # Define negative log-likelihood function for optimization
-                    function f(t)
+                    function f(t::Float64)
                         if t < 0 || t > max_scale
                             return Inf
                         end
                         try
-                            return -sequence_likelihood(model, aln.sequences[i], aln.sequences[j], first(t))
+                            return -sequence_likelihood(model, aln.sequences[i], aln.sequences[j], t)
                         catch
                             return Inf
                         end
                     end
 
-                    # Run optimization
+                    # Run optimization using Brent's method for univariate optimization
                     res = try
-                        optimize(f, [0.0], [max_scale], [initial_scale])
+                        optimize(f, 0.0, max_scale, Brent())
                     catch e
                         @warn "Optimization failed for sequences $(aln.labels[i]) and $(aln.labels[j]): $(sprint(showerror, e))"
                         nothing
@@ -260,7 +238,7 @@ function compute_distances(
 
                     # Extract result
                     if res !== nothing && Optim.converged(res)
-                        D[i,j] = D[j,i] = Optim.minimizer(res)[1]
+                        D[i,j] = D[j,i] = Optim.minimizer(res)
                     else
                         D[i,j] = D[j,i] = NaN
                     end
@@ -279,7 +257,6 @@ function compute_distances(
         end
     end
 
-    # Add computation method to return value for reference
     return (
         distances=D,
         labels=aln.labels,
