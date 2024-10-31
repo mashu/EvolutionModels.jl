@@ -8,6 +8,7 @@ import EvolutionModels: Model, sequence_likelihood, read_alignment, compute_dist
 import EvolutionModels: JC69Model, HKY85Model, GTRModel
 import EvolutionModels: num_parameters, STANDARD_DNA
 export LabeledAlignment
+import EvolutionModels: WAGModel, LGModel, STANDARD_AA
 
 # Custom error types for better error handling
 struct AlignmentError <: Exception
@@ -109,67 +110,102 @@ end
 
 Compute analytical distance between two sequences based on the model type.
 Returns NaN if the distance cannot be computed.
+
+Supports:
+- DNA models: JC69, K2P, HKY85
+- Protein models: WAG, LG (using Poisson correction)
+
+For protein models, uses the Poisson correction formula:
+d = -log(1 - p), where p is the proportion of different sites.
+
+Returns Inf if sequences are saturated:
+- For DNA models: when p ≥ 0.75
+- For protein models: when p ≥ 0.95 (19/20)
 """
 function compute_analytical_distance(model::Model, seq1::LongSequence, seq2::LongSequence)
-    # Count sites and patterns, ignoring non-standard nucleotides
-    total = 0
-    S = 0  # transitions
-    V = 0  # transversions
-
-    for (x, y) in zip(seq1, seq2)
-        if x in STANDARD_DNA && y in STANDARD_DNA
-            total += 1
-            if x != y
-                if is_transition(x, y)
-                    S += 1
-                else
-                    V += 1
-                end
-            end
-        end
-    end
-
-    # Convert to proportions
-    P = S / total  # proportion of transitions
-    Q = V / total  # proportion of transversions
-
     # Get model type from params
     model_name = get(model.params, :model, nothing)
 
-    if model_name == "JC69"
-        # JC69: d = -3/4 * ln(1 - 4/3 * p), where p = (P + Q)
-        p = (P + Q)
-        return p >= 0.75 ? Inf : -3/4 * log(1 - 4/3 * p)
+    if model_name in ("WAG", "LG")
+        # Count different sites, ignoring non-standard amino acids
+        total = 0
+        diff = 0
 
-    elseif model_name == "K2P"  # Kimura 2-Parameter
-        # K2P: d = -1/2 * ln(1 - 2P - Q) - 1/4 * ln(1 - 2Q)
-        if 2P + Q >= 1 || 2Q >= 1
-            return Inf
-        end
-        return -1/2 * log(1 - 2P - Q) - 1/4 * log(1 - 2Q)
-
-    elseif model_name == "HKY85"
-        # For HKY85, use the modified formula taking into account base frequencies
-        π = model.π  # stationary frequencies
-        πY = π[2] + π[4]  # πC + πT
-        πR = π[1] + π[3]  # πA + πG
-
-        # Modified formula based on Felsenstein (2004)
-        if 2P + Q >= 1 || 2Q >= 1
-            return Inf
+        for (x, y) in zip(seq1, seq2)
+            if x in STANDARD_AA && y in STANDARD_AA
+                total += 1
+                if x != y
+                    diff += 1
+                end
+            end
         end
 
-        k = get(model.params, :kappa, 1.0)  # transition/transversion rate ratio
+        total == 0 && return NaN
+        p = diff / total  # proportion of different sites
 
-        return -2 * (πR * πY * k + πR * πY) * log(1 - P/(2πR * πY) - Q/(2πR * πY)) -
-               2 * (πR * πY) * log(1 - Q/(2πR * πY))
-
-    elseif model_name == "GTR"
-        # For GTR, fall back to ML estimation as there's no simple analytical formula
-        return NaN
+        # For 20 states, the saturation point is 19/20 ≈ 0.95
+        return p >= 0.95 ? Inf : -log(1 - p * 20/19)
 
     else
-        error("Unsupported model for analytical distance: $model_name")
+        # Count sites and patterns, ignoring non-standard nucleotides
+        total = 0
+        S = 0  # transitions
+        V = 0  # transversions
+
+        for (x, y) in zip(seq1, seq2)
+            if x in STANDARD_DNA && y in STANDARD_DNA
+                total += 1
+                if x != y
+                    if is_transition(x, y)
+                        S += 1
+                    else
+                        V += 1
+                    end
+                end
+            end
+        end
+
+        total == 0 && return NaN
+
+        # Convert to proportions
+        P = S / total  # proportion of transitions
+        Q = V / total  # proportion of transversions
+
+        if model_name == "JC69"
+            # JC69: d = -3/4 * ln(1 - 4/3 * p), where p = (P + Q)
+            p = (P + Q)
+            return p >= 0.75 ? Inf : -3/4 * log(1 - 4/3 * p)
+
+        elseif model_name == "K2P"  # Kimura 2-Parameter
+            # K2P: d = -1/2 * ln(1 - 2P - Q) - 1/4 * ln(1 - 2Q)
+            if 2P + Q >= 1 || 2Q >= 1
+                return Inf
+            end
+            return -1/2 * log(1 - 2P - Q) - 1/4 * log(1 - 2Q)
+
+        elseif model_name == "HKY85"
+            # For HKY85, use the modified formula taking into account base frequencies
+            π = model.π  # stationary frequencies
+            πY = π[2] + π[4]  # πC + πT
+            πR = π[1] + π[3]  # πA + πG
+
+            # Modified formula based on Felsenstein (2004)
+            if 2P + Q >= 1 || 2Q >= 1
+                return Inf
+            end
+
+            k = get(model.params, :kappa, 1.0)  # transition/transversion rate ratio
+
+            return -2 * (πR * πY * k + πR * πY) * log(1 - P/(2πR * πY) - Q/(2πR * πY)) -
+                   2 * (πR * πY) * log(1 - Q/(2πR * πY))
+
+        elseif model_name == "GTR"
+            # For GTR, fall back to ML estimation as there's no simple analytical formula
+            return NaN
+
+        else
+            error("Unsupported model for analytical distance: $model_name")
+        end
     end
 end
 
@@ -189,7 +225,7 @@ function compute_distances(
 
     # Determine if analytical method is available
     model_name = get(model.params, :model, nothing)
-    has_analytical = model_name in ("JC69", "K2P", "HKY85")
+    has_analytical = model_name in ("JC69", "K2P", "HKY85", "WAG", "LG")
 
     # Validate method choice
     if method == :analytical && !has_analytical
