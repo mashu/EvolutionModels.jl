@@ -176,14 +176,12 @@ end
 """
     compute_distances(model::Model, aln::LabeledAlignment;
                      method::Symbol=:analytical,
-                     initial_scale::Float64=0.1,
                      max_scale::Float64=100.0) -> NamedTuple
 """
 function compute_distances(
     model::Model,
     aln::LabeledAlignment;
     method::Symbol=:analytical,
-    initial_scale::Float64=0.1,
     max_scale::Float64=100.0
 )
     n = length(aln.sequences)
