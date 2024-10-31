@@ -14,8 +14,11 @@ A Julia package implementing continuous-time Markov models for molecular sequenc
 - Amino acid substitution models: WAG, LG
 - Sequence evolution simulation
 - Likelihood computation
-- Distance matrix computation (requires FASTX.jl and Optim.jl)
+- Distance matrix computation with:
+  - Analytical formulas for JC69, K2P, HKY85 (fast, matches common software)
+  - ML estimation for GTR and other models (more accurate but slower)
 - Integration with BioSequences.jl
+- FASTA support via FASTX.jl extension
 
 ## Installation
 
@@ -55,13 +58,24 @@ seqs = read_alignment("alignment.fasta")
 
 # Create model and compute distances
 model = create_model(JC69Model, 0.1)
+
+# Compute distances using default method (analytical formula for supported models)
 result = compute_distances(model, seqs)
+
+# Or explicitly specify the method:
+result_analytical = compute_distances(model, seqs, method=:analytical)  # Fast, matches FastTree
+result_ml = compute_distances(model, seqs, method=:ml)                 # Slower but more accurate
+result_auto = compute_distances(model, seqs, method=:auto)            # Choose best method for model
 
 # Print the distance matrix
 print_distance_matrix(result)
 ```
 
-The resulting distance matrix contains maximum likelihood estimates of evolutionary times between sequences under the specified model. This can be used for:
+The resulting distance matrix contains evolutionary distances computed using either:
+- Analytical formulas (for JC69, K2P, HKY85) that match common phylogenetic software
+- Maximum likelihood estimation (for GTR and other models) that may be more accurate for highly diverged sequences
+
+These distances can be used for:
 - Phylogenetic tree reconstruction
 - Sequence clustering
 - Evolutionary rate estimation
