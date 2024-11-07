@@ -3,6 +3,7 @@ module FASTXExt
 using FASTX
 using BioSequences
 using Optim
+using LinearAlgebra
 
 import EvolutionModels: Model, sequence_likelihood, read_alignment, compute_distances, is_transition
 import EvolutionModels: JC69Model, HKY85Model, GTRModel
@@ -67,12 +68,6 @@ Read multiple sequence alignment from FASTA file.
 - `SystemError`: If file cannot be opened or read
 - `AlignmentError`: If alignment is empty or sequences are not of equal length
 - `SequenceConversionError`: If sequences cannot be converted to appropriate type
-
-# Example
-```julia
-aln = read_alignment("alignment.fasta")
-println("Loaded \$(length(aln.sequences)) sequences of length \$(aln.length)")
-```
 """
 function read_alignment(fasta_file::String)
     !isfile(fasta_file) && throw(SystemError("File not found: $fasta_file"))
@@ -106,187 +101,80 @@ function read_alignment(fasta_file::String)
 end
 
 """
-    compute_analytical_distance(model::Model, seq1::LongSequence, seq2::LongSequence) -> Float64
-
-Compute analytical distance between two sequences based on the model type.
-Returns NaN if the distance cannot be computed.
-
-Supports:
-- DNA models: JC69, K2P, HKY85
-- Protein models: WAG, LG (using Poisson correction)
-
-For protein models, uses the Poisson correction formula:
-d = -log(1 - p), where p is the proportion of different sites.
-
-Returns Inf if sequences are saturated:
-- For DNA models: when p ≥ 0.75
-- For protein models: when p ≥ 0.95 (19/20)
-"""
-function compute_analytical_distance(model::Model, seq1::LongSequence, seq2::LongSequence)
-    # Get model type from params
-    model_name = get(model.params, :model, nothing)
-
-    if model_name in ("WAG", "LG")
-        # Count different sites, ignoring non-standard amino acids
-        total = 0
-        diff = 0
-
-        for (x, y) in zip(seq1, seq2)
-            if x in STANDARD_AA && y in STANDARD_AA
-                total += 1
-                if x != y
-                    diff += 1
-                end
-            end
-        end
-
-        total == 0 && return NaN
-        p = diff / total  # proportion of different sites
-
-        # For 20 states, the saturation point is 19/20 ≈ 0.95
-        return p >= 0.95 ? Inf : -log(1 - p * 20/19)
-
-    else
-        # Count sites and patterns, ignoring non-standard nucleotides
-        total = 0
-        S = 0  # transitions
-        V = 0  # transversions
-
-        for (x, y) in zip(seq1, seq2)
-            if x in STANDARD_DNA && y in STANDARD_DNA
-                total += 1
-                if x != y
-                    if is_transition(x, y)
-                        S += 1
-                    else
-                        V += 1
-                    end
-                end
-            end
-        end
-
-        total == 0 && return NaN
-
-        # Convert to proportions
-        P = S / total  # proportion of transitions
-        Q = V / total  # proportion of transversions
-
-        if model_name == "JC69"
-            # JC69: d = -3/4 * ln(1 - 4/3 * p), where p = (P + Q)
-            p = (P + Q)
-            return p >= 0.75 ? Inf : -3/4 * log(1 - 4/3 * p)
-
-        elseif model_name == "K2P"  # Kimura 2-Parameter
-            # K2P: d = -1/2 * ln(1 - 2P - Q) - 1/4 * ln(1 - 2Q)
-            if 2P + Q >= 1 || 2Q >= 1
-                return Inf
-            end
-            return -1/2 * log(1 - 2P - Q) - 1/4 * log(1 - 2Q)
-
-        elseif model_name == "HKY85"
-            # For HKY85, use the modified formula taking into account base frequencies
-            π = model.π  # stationary frequencies
-            πY = π[2] + π[4]  # πC + πT
-            πR = π[1] + π[3]  # πA + πG
-
-            # Modified formula based on Felsenstein (2004)
-            if 2P + Q >= 1 || 2Q >= 1
-                return Inf
-            end
-
-            k = get(model.params, :kappa, 1.0)  # transition/transversion rate ratio
-
-            return -2 * (πR * πY * k + πR * πY) * log(1 - P/(2πR * πY) - Q/(2πR * πY)) -
-                   2 * (πR * πY) * log(1 - Q/(2πR * πY))
-
-        elseif model_name == "GTR"
-            # For GTR, fall back to ML estimation as there's no simple analytical formula
-            return NaN
-
-        else
-            error("Unsupported model for analytical distance: $model_name")
-        end
-    end
-end
-
-"""
     compute_distances(model::Model, aln::LabeledAlignment;
-                     method::Symbol=:analytical,
                      max_scale::Float64=100.0) -> NamedTuple
+
+Compute pairwise distances between all sequences in the alignment using maximum likelihood.
+
+# Arguments
+- `model::Model`: Evolutionary model (JC69, HKY85, GTR, WAG, LG)
+- `aln::LabeledAlignment`: Aligned sequences with labels
+- `max_scale::Float64`: Maximum distance to consider (default=100.0)
+
+# Returns
+NamedTuple containing:
+- `distances`: Distance matrix
+- `labels`: Sequence labels
+- `model`: Model name
 """
 function compute_distances(
     model::Model,
     aln::LabeledAlignment;
-    method::Symbol=:analytical,
     max_scale::Float64=100.0
 )
     n = length(aln.sequences)
     D = zeros(n, n)
-
-    # Determine if analytical method is available
     model_name = get(model.params, :model, nothing)
-    has_analytical = model_name in ("JC69", "K2P", "HKY85", "WAG", "LG")
 
-    # Validate method choice
-    if method == :analytical && !has_analytical
-        error("Analytical method not available for model: $model_name")
-    end
+    Threads.@threads for i in 1:n
+        for j in i+1:n
+            # Define negative log-likelihood function for optimization
+            function neg_log_likelihood(t::Float64)
+                if t < 0 || t > max_scale
+                    return Inf
+                end
+                try
+                    return -sequence_likelihood(model, aln.sequences[i], aln.sequences[j], t)
+                catch
+                    return Inf
+                end
+            end
 
-    # Choose method
-    use_ml = if method == :auto
-        !has_analytical
-    elseif method == :analytical
-        false
-    elseif method == :ml
-        true
-    else
-        error("Unknown method: $method")
-    end
-
-    if use_ml
-        # ML implementation
-        n_params = num_parameters(model)
-
-        if n_params == 1
-            Threads.@threads for i in 1:n
-                for j in i+1:n
-                    # Define negative log-likelihood function for optimization
-                    function f(t::Float64)
-                        if t < 0 || t > max_scale
-                            return Inf
-                        end
-                        try
-                            return -sequence_likelihood(model, aln.sequences[i], aln.sequences[j], t)
-                        catch
-                            return Inf
-                        end
-                    end
-
-                    # Run optimization using Brent's method for univariate optimization
-                    res = try
-                        optimize(f, 0.0, max_scale, Brent())
-                    catch e
-                        @warn "Optimization failed for sequences $(aln.labels[i]) and $(aln.labels[j]): $(sprint(showerror, e))"
-                        nothing
-                    end
-
-                    # Extract result
-                    if res !== nothing && Optim.converged(res)
-                        D[i,j] = D[j,i] = Optim.minimizer(res)
-                    else
-                        D[i,j] = D[j,i] = NaN
+            # Count valid positions for basic distance initialization
+            total = 0
+            diff = 0
+            for (x, y) in zip(aln.sequences[i], aln.sequences[j])
+                if (model_name in ("WAG", "LG") && x in STANDARD_AA && y in STANDARD_AA) ||
+                   (model_name in ("JC69", "HKY85", "GTR") && x in STANDARD_DNA && y in STANDARD_DNA)
+                    total += 1
+                    if x != y
+                        diff += 1
                     end
                 end
             end
-        else
-            @warn "Multi-parameter ML optimization not yet implemented for model type: $model_name"
-            D .= NaN
-        end
-    else
-        # Analytical formula implementation
-        Threads.@threads for i in 1:n
-            for j in i+1:n
-                D[i,j] = D[j,i] = compute_analytical_distance(model, aln.sequences[i], aln.sequences[j])
+
+            if total == 0
+                D[i,j] = D[j,i] = NaN
+                continue
+            end
+
+            # Simple initialization based on proportion of differences
+            t_init = diff / total * 2.0  # Scale factor of 2 as a simple heuristic
+
+            # Run optimization using Brent's method
+            # Note: Brent's method requires an interval [lower, upper]
+            res = try
+                optimize(neg_log_likelihood, t_init, max_scale, Brent())
+            catch e
+                @warn "Optimization failed for sequences $(aln.labels[i]) and $(aln.labels[j]): $(sprint(showerror, e))"
+                nothing
+            end
+
+            # Extract result
+            if res !== nothing && Optim.converged(res)
+                D[i,j] = D[j,i] = Optim.minimizer(res)
+            else
+                D[i,j] = D[j,i] = NaN
             end
         end
     end
@@ -294,12 +182,15 @@ function compute_distances(
     return (
         distances=D,
         labels=aln.labels,
-        method=use_ml ? :ml : :analytical,
         model=model_name
     )
 end
 
-# Helper function to determine number of parameters
+"""
+    num_parameters(model::Model) -> Int
+
+Helper function to determine number of parameters in the model.
+"""
 function num_parameters(model::Model)
     model_name = get(model.params, :model, nothing)
 
@@ -321,6 +212,10 @@ end
     print_distance_matrix(result::NamedTuple; digits::Int=4)
 
 Pretty print a labeled distance matrix.
+
+# Arguments
+- `result::NamedTuple`: Output from compute_distances
+- `digits::Int`: Number of decimal places to display (default=4)
 """
 function print_distance_matrix(result::NamedTuple; digits::Int=4)
     D, labels = result.distances, result.labels
@@ -342,7 +237,7 @@ function print_distance_matrix(result::NamedTuple; digits::Int=4)
         print(rpad(labels[i][1:min(end,20)], label_pad))
         for j in 1:n
             val = D[i,j]
-            str = isnan(val) ? "NA" : "$(val)"
+            str = isnan(val) ? "NA" : "$(round(val; digits=digits))"
             print(rpad(str, num_pad))
         end
         println()
