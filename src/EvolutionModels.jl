@@ -4,6 +4,7 @@ using LinearAlgebra
 using BioSequences
 using Random
 using StatsBase
+using SpecialFunctions: gamma
 
 # Extension interface functions that will be implemented by extensions
 function read_alignment end
@@ -19,10 +20,12 @@ include("utils.jl")
 include("parametric.jl")
 include("empirical.jl")
 include("evolution.jl")
+include("rate_variation.jl")
 
 # Export types
 export SequenceType, DNAType, ProteinType
 export EvolutionModel, DNAModel, ProteinModel, Model
+export GammaRateModel, PartitionModel
 
 # Export model types
 export JC69Model, HKY85Model, GTRModel, WAGModel, LGModel
@@ -31,12 +34,13 @@ export JC69Model, HKY85Model, GTRModel, WAGModel, LGModel
 export STANDARD_DNA, STANDARD_AA
 
 # Export functions
-export create_model
+export create_model, create_gamma_model, create_partition_model
 export transition_probability_matrix
 export stationary_frequencies, rate_matrix
 export evolve_sequence, sequence_likelihood
 export symbols  # Export symbols function
 export expected_substitution_rate  # Utility for checking model scaling
+export discrete_gamma_rates  # Utility for Gamma rate variation
 
 # Interface functions
 """

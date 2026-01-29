@@ -1,18 +1,19 @@
 name = "EvolutionModels"
 uuid = "82fd434d-99cf-4c3d-8b70-d47173cbd781"
 authors = ["Mateusz Kaduk <mateusz.kaduk@gmail.com> and contributors"]
-version = "0.0.1"
+version = "0.0.2"
 
 [deps]
 BioSequences = "7e6ae17a-c86d-528c-b3b9-7f778a29fe59"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
 Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
+SpecialFunctions = "276daf66-3868-5448-9aa4-cd146d93841b"
 StatsBase = "2913bbd2-ae8a-5f71-8c99-4fb6c76f3a91"
 
 [weakdeps]
 FASTX = "c2308a5c-f048-11e8-3e8a-31650f418d12"
-
 Optim = "429524aa-4258-5aef-a3af-852621145aeb"
+
 [extensions]
 FASTXExt = ["FASTX", "Optim"]
 
@@ -22,13 +23,15 @@ FASTX = "2.1.7"
 LinearAlgebra = "^1.10"
 Optim = "1.9.4"
 Random = "^1.10"
+SpecialFunctions = "2"
 StatsBase = "0.34.3"
 julia = "1.10"
 
 [extras]
 FASTX = "c2308a5c-f048-11e8-3e8a-31650f418d12"
 Optim = "429524aa-4258-5aef-a3af-852621145aeb"
+Statistics = "10745b16-79ce-11e8-11f9-7d13ad32a3b2"
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
 [targets]
-test = ["Test", "FASTX", "Optim"]
+test = ["Test", "FASTX", "Optim", "Statistics"]

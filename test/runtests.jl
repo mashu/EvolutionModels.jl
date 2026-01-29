@@ -3,6 +3,7 @@ using EvolutionModels
 using BioSequences
 using LinearAlgebra
 using Random
+using Statistics: std
 import EvolutionModels: symbols
 import EvolutionModels: is_transition
 using FASTX
@@ -187,6 +188,112 @@ import EvolutionModels: expected_substitution_rate
             
             @test isapprox(rate_norm, 1.0, atol=1e-10)
             @test rate_raw ≈ 0.75  # 3μ/4 for JC69 with μ=1
+        end
+    end
+
+    @testset "Gamma Rate Models" begin
+        @testset "discrete_gamma_rates" begin
+            rates, weights = discrete_gamma_rates(1.0, 4)
+            @test length(rates) == 4
+            @test length(weights) == 4
+            @test all(weights .≈ 0.25)
+            @test isapprox(sum(rates .* weights), 1.0, atol=0.1)  # Mean ≈ 1
+            
+            # Higher α = less variation
+            rates_low_var, _ = discrete_gamma_rates(10.0, 4)
+            rates_high_var, _ = discrete_gamma_rates(0.5, 4)
+            @test std(rates_low_var) < std(rates_high_var)
+        end
+
+        @testset "GammaRateModel creation" begin
+            base = create_model(LGModel, 1.0, normalize=true)
+            model = create_gamma_model(base, 1.0)
+            
+            @test model.α == 1.0
+            @test length(model.rates) == 4
+            @test length(model.weights) == 4
+            @test model.base_model === base
+        end
+
+        @testset "GammaRateModel likelihood" begin
+            base = create_model(LGModel, 1.0, normalize=true)
+            model = create_gamma_model(base, 1.0)
+            
+            seq1 = aa"EVQLVESGGGLVQPGGSLRL"
+            seq2 = aa"EVQLVESGGGLIQPGGSLRL"
+            
+            # Gamma model likelihood should be computable
+            L_gamma = sequence_likelihood(model, seq1, seq2, 0.1)
+            L_base = sequence_likelihood(base, seq1, seq2, 0.1)
+            
+            @test isfinite(L_gamma)
+            @test L_gamma < 0  # Log-likelihood is negative
+            
+            # Joint vs conditional
+            L_joint = sequence_likelihood(model, seq1, seq2, 0.1, joint=true)
+            L_cond = sequence_likelihood(model, seq1, seq2, 0.1, joint=false)
+            @test L_joint < L_cond
+        end
+
+        @testset "GammaRateModel evolution" begin
+            Random.seed!(42)
+            base = create_model(LGModel, 1.0, normalize=true)
+            model = create_gamma_model(base, 1.0)
+            
+            seq = aa"EVQLVESGGGLVQPGGSLRL"
+            evolved = evolve_sequence(model, seq, 0.1)
+            
+            @test length(evolved) == length(seq)
+            @test all(aa in STANDARD_AA for aa in evolved)
+        end
+    end
+
+    @testset "Partition Models" begin
+        @testset "PartitionModel creation" begin
+            model1 = create_model(LGModel, 1.0, normalize=true)
+            model2 = create_model(LGModel, 2.0, normalize=true)
+            
+            partition = create_partition_model(
+                1:10 => model1,
+                11:20 => model2
+            )
+            
+            @test length(partition.partitions) == 2
+            @test partition.total_length == 20
+        end
+
+        @testset "PartitionModel likelihood" begin
+            model_slow = create_model(LGModel, 1.0, normalize=true)
+            model_fast = create_model(LGModel, 1.0, normalize=true)
+            
+            partition = create_partition_model(
+                1:10 => model_slow,
+                11:20 => model_fast
+            )
+            
+            seq1 = aa"EVQLVESGGGLVQPGGSLRL"
+            seq2 = aa"EVQLVESGGGLIQPGGSLRL"
+            
+            L = sequence_likelihood(partition, seq1, seq2, 0.1)
+            @test isfinite(L)
+            @test L < 0
+        end
+
+        @testset "PartitionModel evolution" begin
+            Random.seed!(42)
+            model1 = create_model(LGModel, 1.0, normalize=true)
+            model2 = create_model(LGModel, 2.0, normalize=true)
+            
+            partition = create_partition_model(
+                1:10 => model1,
+                11:20 => model2
+            )
+            
+            seq = aa"EVQLVESGGGLVQPGGSLRL"
+            evolved = evolve_sequence(partition, seq, 0.1)
+            
+            @test length(evolved) == length(seq)
+            @test all(aa in STANDARD_AA for aa in evolved)
         end
     end
 

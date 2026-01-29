@@ -72,3 +72,57 @@ struct Model{S<:SequenceType}
     Q::Matrix{Float64}            # Generator matrix
     params::Dict{Symbol,Any}      # Model-specific parameters
 end
+
+"""
+    GammaRateModel{S<:SequenceType}
+
+Evolution model with discrete Gamma rate variation across sites.
+
+Wraps a base Model and adds rate categories from a discretized Gamma distribution.
+This accounts for site-to-site rate heterogeneity common in biological sequences.
+
+# Fields
+- `base_model::Model{S}`: The underlying substitution model
+- `α::Float64`: Gamma shape parameter (smaller = more variation)
+- `rates::Vector{Float64}`: Discrete rate categories
+- `weights::Vector{Float64}`: Probability of each rate category (typically uniform)
+"""
+struct GammaRateModel{S<:SequenceType}
+    base_model::Model{S}
+    α::Float64
+    rates::Vector{Float64}
+    weights::Vector{Float64}
+end
+
+"""
+    PartitionModel
+
+Model that applies different evolutionary models to different sequence regions.
+
+Useful for analyzing sequences with distinct evolutionary patterns, such as
+antibody CDR vs framework regions.
+
+# Fields
+- `partitions::Vector{Tuple{UnitRange{Int}, Model}}`: List of (site_range, model) pairs
+- `total_length::Int`: Total sequence length covered
+"""
+struct PartitionModel
+    partitions::Vector{Tuple{UnitRange{Int}, Model}}
+    total_length::Int
+    
+    function PartitionModel(partitions::Vector{<:Tuple{UnitRange{Int}, Model}})
+        # Validate partitions don't overlap and cover sequence
+        sorted = sort(partitions, by=p->first(p[1]))
+        total_length = 0
+        for (i, (range, _)) in enumerate(sorted)
+            if i > 1
+                prev_end = last(sorted[i-1][1])
+                if first(range) <= prev_end
+                    throw(ArgumentError("Partition ranges overlap"))
+                end
+            end
+            total_length = max(total_length, last(range))
+        end
+        new(collect(partitions), total_length)
+    end
+end

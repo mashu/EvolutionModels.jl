@@ -83,7 +83,9 @@ model = create_model(WAGModel, 1.0, normalize=true)
 
 | Data Type | Model | Configuration |
 |-----------|-------|---------------|
-| Protein sequences | LG | `create_model(LGModel, 1.0, normalize=true)` |
+| Protein (simple) | LG | `create_model(LGModel, 1.0, normalize=true)` |
+| Protein (rate variation) | LG+G | `create_gamma_model(base_lg, 1.0)` |
+| Antibodies | LG+G or Partition | See Antibody section |
 | DNA (general) | HKY85 | `create_model(HKY85Model, 1.0, π, 2.0, normalize=true)` |
 | DNA (quick estimate) | JC69 | `create_model(JC69Model, 1.0, normalize=true)` |
 
@@ -129,6 +131,26 @@ For highly divergent sequences (p-distance > 0.7), distance estimates become unr
 
 ## Antibody Sequence Analysis
 
+### Recommended Models for Antibodies
+
+For antibody sequences, we recommend using rate variation models since CDR and framework regions evolve at very different rates:
+
+```julia
+# Option 1: LG+G (simplest, good default)
+base = create_model(LGModel, 1.0, normalize=true)
+model = create_gamma_model(base, 0.8)  # α=0.8 captures CDR/FR heterogeneity
+
+# Option 2: Partition model (if you know CDR boundaries)
+framework = create_model(LGModel, 1.0, normalize=true)
+cdr = create_model(LGModel, 2.5, normalize=true)  # CDRs evolve faster
+model = create_partition_model(
+    1:26 => framework, 27:38 => cdr,      # FR1, CDR1
+    39:55 => framework, 56:65 => cdr,     # FR2, CDR2
+    66:104 => framework, 105:117 => cdr,  # FR3, CDR3
+    118:128 => framework                   # FR4
+)
+```
+
 ### Measuring Somatic Hypermutation
 
 Evolutionary distance between germline and mutated antibody sequences quantifies the extent of somatic hypermutation (SHM).
@@ -138,7 +160,9 @@ using EvolutionModels
 using BioSequences
 using Optim
 
-model = create_model(LGModel, 1.0, normalize=true)
+# Use Gamma model for better handling of rate variation
+base = create_model(LGModel, 1.0, normalize=true)
+model = create_gamma_model(base, 1.0)
 
 germline = aa"EVQLVESGGGLVQPGGSLRLSCAASGFTFSSYAMSWVRQAPGKGLEWVSAISGSGGSTYYADSVKGRFTISRDNSKNTLYLQMNSLRAEDTAVYYCAK"
 mutated  = aa"EVQLVESGGGLVQPGRSLRLSCAASGFTFSSYWMSWVRQAPGKGLEWVANIKQDGSEKYYVDSVKGRFTISRDNAKNSLYLQMNSLRAEDTAVYYCAK"
@@ -437,16 +461,101 @@ println("Log likelihood ratio: $log_ratio")
 
 ---
 
+## Advanced Models
+
+### Gamma Rate Variation (+G Models)
+
+Real sequences have sites that evolve at different rates - some positions are highly conserved while others are hypervariable. The Gamma model accounts for this by drawing site rates from a discretized Gamma distribution.
+
+```julia
+# Create base model
+base = create_model(LGModel, 1.0, normalize=true)
+
+# Add Gamma rate variation with 4 categories
+# α controls rate variation: smaller = more variation
+model = create_gamma_model(base, 0.5)   # High variation
+model = create_gamma_model(base, 1.0)   # Moderate variation  
+model = create_gamma_model(base, 2.0)   # Low variation
+```
+
+**When to use:**
+- Sequences with mix of conserved and variable sites
+- Antibody analysis (CDRs are hypervariable, frameworks conserved)
+- Any analysis where assuming uniform rates seems unrealistic
+
+**Parameter α guidance:**
+| α value | Rate variation | Typical use |
+|---------|---------------|-------------|
+| 0.3-0.5 | Very high | Highly heterogeneous data |
+| 0.5-1.0 | High | Antibodies, proteins with functional constraints |
+| 1.0-2.0 | Moderate | General protein analysis |
+| >2.0 | Low | Relatively homogeneous rates |
+
+### Partition Models (Region-Specific Evolution)
+
+For antibodies, CDR and framework regions evolve differently. Partition models apply different evolutionary parameters to different sequence regions.
+
+```julia
+# Different models for different regions
+framework = create_model(LGModel, 1.0, normalize=true)
+cdr = create_model(LGModel, 2.0, normalize=true)  # 2× rate for CDRs
+
+# IMGT numbering example for VH
+model = create_partition_model(
+    1:26 => framework,     # FR1
+    27:38 => cdr,          # CDR1
+    39:55 => framework,    # FR2
+    56:65 => cdr,          # CDR2
+    66:104 => framework,   # FR3
+    105:117 => cdr,        # CDR3
+    118:128 => framework   # FR4
+)
+
+# Use like any other model
+seq1 = aa"..."  # Your antibody sequence
+seq2 = aa"..."
+logL = sequence_likelihood(model, seq1, seq2, 0.1)
+```
+
+**When to use:**
+- Antibody sequences with defined CDR/framework boundaries
+- Multi-domain proteins with different evolutionary pressures
+- Any sequence with distinct functional regions
+
+### Combining Approaches
+
+You can use Gamma models as the base for partition models:
+
+```julia
+# Framework: conserved, low rate variation
+framework_base = create_model(LGModel, 1.0, normalize=true)
+framework = create_gamma_model(framework_base, 2.0)  # α=2, low variation
+
+# CDR: hypervariable, high rate variation
+cdr_base = create_model(LGModel, 2.0, normalize=true)
+cdr = create_gamma_model(cdr_base, 0.5)  # α=0.5, high variation
+
+model = create_partition_model(
+    1:26 => framework,
+    27:38 => cdr,
+    # ... etc
+)
+```
+
+---
+
 ## Limitations and Considerations
 
 ### Model Assumptions
 
-All models assume:
-- **Site independence**: Each position evolves independently
-- **Time reversibility**: Process is stationary and reversible
-- **Homogeneous rates**: Same process at all sites (no rate variation)
+**Basic models** (JC69, HKY85, GTR, WAG, LG) assume:
+- Site independence: Each position evolves independently
+- Time reversibility: Process is stationary and reversible
+- Homogeneous rates: Same process at all sites
 
-These assumptions may be violated in biological data, particularly for antibodies where CDR regions experience selection.
+**Gamma models** (+G) relax the homogeneous rates assumption by allowing site-specific rate variation.
+
+**Partition models** allow region-specific parameters but still assume independence within each region.
 
 ### Empirical Models and SHM
 
