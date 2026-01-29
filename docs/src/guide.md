@@ -133,7 +133,7 @@ For highly divergent sequences (p-distance > 0.7), distance estimates become unr
 
 ### Recommended Models for Antibodies
 
-For antibody sequences, we recommend using rate variation models since CDR and framework regions evolve at very different rates:
+For antibody sequences, we recommend using rate variation models since CDR and framework regions evolve at very different rates. Full details, parameter guidance, and when to use +G vs partition: [Advanced Models](@ref "Advanced Models").
 
 ```julia
 # Option 1: LG+G (simplest, good default)
@@ -463,9 +463,23 @@ println("Log likelihood ratio: $log_ratio")
 
 ## Advanced Models
 
+**When to use which:**
+
+| Situation | Use | Example |
+|-----------|-----|---------|
+| Antibodies, protein (no CDR boundaries) | **LG+G** | `create_gamma_model(base_lg, 0.8)` |
+| Antibodies, **DNA** (V region nucleotides) | **HKY85+G** or **JC69+G** | `create_gamma_model(base_hky, 1.0)` |
+| Antibodies (CDR/FR boundaries known) | **Partition model** | Different rates for CDR vs framework |
+| General proteins with conserved/variable sites | **LG+G** | `create_gamma_model(base_lg, 1.0)` |
+| Multi-domain or multi-region sequences | **Partition model** | One model per region |
+
+See below for full examples and parameter guidance.
+
 ### Gamma Rate Variation (+G Models)
 
-Real sequences have sites that evolve at different rates - some positions are highly conserved while others are hypervariable. The Gamma model accounts for this by drawing site rates from a discretized Gamma distribution.
+Real sequences have sites that evolve at different rates - some positions are highly conserved while others are hypervariable. The Gamma model accounts for this by drawing site rates from a discretized Gamma distribution. **+G works with any base model**, including DNA (JC69, HKY85, GTR) and protein (WAG, LG).
+
+**Protein (e.g. antibody amino acid):**
 
 ```julia
 # Create base model
@@ -478,9 +492,27 @@ model = create_gamma_model(base, 1.0)   # Moderate variation
 model = create_gamma_model(base, 2.0)   # Low variation
 ```
 
+**DNA (e.g. antibody V region nucleotides):** Use HKY85+G to capture both transition bias (SHM) and site-to-site rate variation:
+
+```julia
+using EvolutionModels
+using BioSequences
+
+π = [0.25, 0.25, 0.25, 0.25]  # A, C, G, T
+κ = 2.5   # Transition bias (typical for AID-mediated SHM)
+base = create_model(HKY85Model, 1.0, π, κ, normalize=true)
+model = create_gamma_model(base, 1.0)  # α=1 for moderate rate variation
+
+germline_nt = dna"GAGGTGCAGCTGGTGGAGTCTGGGGGAGGCTTGGTACAGCCTGGGGGGTCCCTGAGACTCTCCTGTGCAGCCTCT"
+mutated_nt  = dna"GAGGTGCAGCTGGTGGAGTCTGGGGGAGGCTTGGTGCAGCCTGGGGGGTCCCTGAGACTCTCCTGTGCAGCCTCT"
+
+logL = sequence_likelihood(model, germline_nt, mutated_nt, 0.05)
+evolved = evolve_sequence(model, germline_nt, 0.05)
+```
+
 **When to use:**
 - Sequences with mix of conserved and variable sites
-- Antibody analysis (CDRs are hypervariable, frameworks conserved)
+- Antibody analysis at protein level (CDRs vs frameworks) or DNA level (V region)
 - Any analysis where assuming uniform rates seems unrealistic
 
 **Parameter α guidance:**
@@ -518,9 +550,32 @@ logL = sequence_likelihood(model, seq1, seq2, 0.1)
 ```
 
 **When to use:**
-- Antibody sequences with defined CDR/framework boundaries
+- Antibody sequences with defined CDR/framework boundaries (e.g. IMGT numbering)
 - Multi-domain proteins with different evolutionary pressures
 - Any sequence with distinct functional regions
+
+**Antibody example with partition model:**
+
+```julia
+using EvolutionModels
+using BioSequences
+
+# Framework and CDR models (CDRs evolve faster)
+framework = create_model(LGModel, 1.0, normalize=true)
+cdr = create_model(LGModel, 2.5, normalize=true)
+
+model = create_partition_model(
+    1:26 => framework, 27:38 => cdr,      # FR1, CDR1
+    39:55 => framework, 56:65 => cdr,     # FR2, CDR2
+    66:104 => framework, 105:117 => cdr,   # FR3, CDR3
+    118:128 => framework                   # FR4
+)
+
+germline = aa"EVQLVESGGGLVQPGGSLRLSCAASGFTFSSYAMSWVRQAPGKGLEWVSAISGSGGSTYYADSVKGRFTISRDNSKNTLYLQMNSLRAEDTAVYYCAK"
+mutated  = aa"EVQLVESGGGLVQPGRSLRLSCAASGFTFSSYWMSWVRQAPGKGLEWVANIKQDGSEKYYVDSVKGRFTISRDNAKNSLYLQMNSLRAEDTAVYYCAK"
+
+logL = sequence_likelihood(model, germline, mutated, 0.08)
+```
 
 ### Combining Approaches
 

@@ -14,6 +14,7 @@ EvolutionModels.jl implements continuous-time Markov chain (CTMC) models for mol
 
 - **DNA Models**: JC69, HKY85, GTR
 - **Protein Models**: WAG, LG (empirical amino acid substitution matrices)
+- **Rate variation**: Gamma (+G) and partition models for site- or region-specific rates (e.g. antibody CDR vs framework)
 - **Simulation**: Evolve sequences along branches
 - **Likelihood**: Compute probabilities of sequence pairs
 - **Distance Estimation**: ML-based pairwise evolutionary distances
@@ -178,14 +179,23 @@ labels = result.labels  # Sequence names
 
 EvolutionModels.jl is well-suited for analyzing antibody evolution, including somatic hypermutation and B cell lineage analysis.
 
+**Recommended for antibodies:** Use **Gamma (+G)** or **partition** models, since CDR and framework regions evolve at different rates. See the [Theoretical Guide](guide.md) for when to use each and full examples.
+
+- **LG+G**: Single model with site-to-site rate variation (good default when you don't have CDR boundaries).
+- **Partition model**: Different models per region when you know CDR/FR boundaries (e.g. IMGT numbering).
+
 ### Analyzing VH Region Evolution
 
 ```julia
 using EvolutionModels
 using BioSequences
 
-# Use LG model for protein-level analysis
-model = create_model(LGModel, 1.0, normalize=true)
+# Recommended: LG+G for rate variation (CDRs vs frameworks)
+base = create_model(LGModel, 1.0, normalize=true)
+model = create_gamma_model(base, 0.8)  # α=0.8 typical for antibodies
+
+# Or plain LG if you prefer a simple model
+# model = create_model(LGModel, 1.0, normalize=true)
 
 # Germline VH sequence (IGHV3-23*01)
 germline = aa"EVQLVESGGGLVQPGGSLRLSCAASGFTFSSYAMSWVRQAPGKGLEWVSAISGSGGSTYYADSVKGRFTISRDNSKNTLYLQMNSLRAEDTAVYYCAK"
@@ -304,6 +314,8 @@ When using normalized models, the evolutionary distance t represents expected am
 | GTR | DNA (4) | 4+6 | Full flexibility |
 | WAG | Protein (20) | 1 (μ) | General protein evolution |
 | LG | Protein (20) | 1 (μ) | Modern protein analysis |
+| **LG+G** | Protein (20) | 1+α | Rate variation (e.g. antibodies) — see [Theoretical Guide](guide.md) |
+| **Partition** | Any | per region | Different regions (e.g. CDR vs framework) — see [Theoretical Guide](guide.md) |
 
 ## API Reference
 

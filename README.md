@@ -15,6 +15,7 @@ Continuous-time Markov models for molecular sequence evolution in Julia.
 
 - **DNA models**: JC69, HKY85, GTR
 - **Protein models**: WAG, LG
+- **Rate variation**: Gamma (+G) and partition models (e.g. CDR vs framework for antibodies)
 - Sequence evolution simulation
 - Pairwise likelihood computation
 - ML distance estimation
@@ -46,7 +47,7 @@ logL = sequence_likelihood(model, seq, evolved, 0.1)
 
 ## Documentation
 
-See the [documentation](https://mashu.github.io/EvolutionModels.jl/dev/) for model selection guidance, distance interpretation, and antibody sequence analysis examples.
+See the [documentation](https://mashu.github.io/EvolutionModels.jl/dev/) for model selection, when to use Gamma (+G) and partition models, distance interpretation, and antibody sequence examples.
 
 ## License
 
