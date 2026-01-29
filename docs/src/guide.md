@@ -516,6 +516,7 @@ evolved = evolve_sequence(model, germline_nt, 0.05)
 - Any analysis where assuming uniform rates seems unrealistic
 
 **Parameter α guidance:**
+
 | α value | Rate variation | Typical use |
 |---------|---------------|-------------|
 | 0.3-0.5 | Very high | Highly heterogeneous data |
