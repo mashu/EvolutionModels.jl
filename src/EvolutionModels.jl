@@ -35,6 +35,7 @@ export transition_probability_matrix
 export stationary_frequencies, rate_matrix
 export evolve_sequence, sequence_likelihood
 export symbols  # Export symbols function
+export expected_substitution_rate  # Utility for checking model scaling
 
 # Interface functions
 """

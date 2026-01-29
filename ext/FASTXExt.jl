@@ -158,23 +158,51 @@ function compute_distances(
                 continue
             end
 
-            # Simple initialization based on proportion of differences
-            t_init = diff / total * 2.0  # Scale factor of 2 as a simple heuristic
+            # Compute proportion of differences (p-distance)
+            p_dist = diff / total
+            
+            # Handle identical sequences - distance is 0
+            if diff == 0
+                D[i,j] = D[j,i] = 0.0
+                continue
+            end
+            
+            # Initial estimate based on Jukes-Cantor correction as heuristic
+            # For JC69: d = -3/4 * ln(1 - 4p/3) when p < 0.75
+            # This provides a reasonable starting point for any model
+            if p_dist < 0.75
+                t_init = -0.75 * log(1.0 - 4.0 * p_dist / 3.0)
+            else
+                # For highly divergent sequences, use a larger estimate
+                t_init = 2.0  # Roughly 2 substitutions per site
+            end
+            
+            # Set search bounds using t_init as guidance
+            # Lower bound: small positive to avoid log(0) issues
+            # Upper bound: expand beyond t_init but cap at max_scale
+            t_lower = 1e-10
+            t_upper = min(max(t_init * 5.0, 1.0), max_scale)
 
-            # Run optimization using Brent's method
-            # Note: Brent's method requires an interval [lower, upper]
+            # Run optimization using Brent's method on informed interval
             res = try
-                optimize(neg_log_likelihood, t_init, max_scale, Brent())
+                optimize(neg_log_likelihood, t_lower, t_upper, Brent())
             catch e
-                @warn "Optimization failed for sequences $(aln.labels[i]) and $(aln.labels[j]): $(sprint(showerror, e))"
-                nothing
+                # If first attempt fails, try full interval
+                try
+                    optimize(neg_log_likelihood, t_lower, max_scale, Brent())
+                catch e2
+                    @warn "Optimization failed for sequences $(aln.labels[i]) and $(aln.labels[j]): $(sprint(showerror, e2))"
+                    nothing
+                end
             end
 
-            # Extract result
+            # Extract result, fall back to t_init if optimization didn't converge
             if res !== nothing && Optim.converged(res)
                 D[i,j] = D[j,i] = Optim.minimizer(res)
             else
-                D[i,j] = D[j,i] = NaN
+                # Use JC-corrected estimate as fallback
+                D[i,j] = D[j,i] = t_init
+                @warn "Using initial estimate for $(aln.labels[i]) vs $(aln.labels[j]): t=$t_init"
             end
         end
     end

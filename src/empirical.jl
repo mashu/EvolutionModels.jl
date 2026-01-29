@@ -1,5 +1,5 @@
 """
-    create_model(::Type{WAGModel}, μ::Float64)
+    create_model(::Type{WAGModel}, μ::Float64; normalize::Bool=false)
 
 Create a WAG (Whelan And Goldman) protein evolution model with specified rate scaling factor μ.
 Returns a `Model{ProteinType}` with empirical substitution rates and frequencies.
@@ -16,11 +16,22 @@ DOI: 10.1093/oxfordjournals.molbev.a003851
 
 # Arguments
 - `μ::Float64`: Rate scaling factor (must be positive)
+- `normalize::Bool=false`: If true, normalize Q so expected substitutions per unit time = 1
 
 # Returns
 - `Model{ProteinType}`: Configured WAG model
+
+# Example
+```julia
+# Create WAG model for antibody sequence analysis
+model = create_model(WAGModel, 1.0, normalize=true)
+
+# Evolve an antibody variable region sequence
+seq = aa"EVQLVESGGGLVQPGGSLRLSCAAS"
+evolved = evolve_sequence(model, seq, 0.1)
+```
 """
-function create_model(::Type{WAGModel}, μ::Float64)
+function create_model(::Type{WAGModel}, μ::Float64; normalize::Bool=false)
     μ > 0 || throw(ArgumentError("μ must be positive"))
 
     seq_type = ProteinType()
@@ -29,13 +40,18 @@ function create_model(::Type{WAGModel}, μ::Float64)
 
     P = Diagonal(π)
     Q = compute_q_matrix(R, P)
-    params = Dict{Symbol,Any}(:model => "WAG")
+    
+    if normalize
+        normalize_rate_matrix!(Q, π)
+    end
+    
+    params = Dict{Symbol,Any}(:model => "WAG", :normalized => normalize)
 
     Model{ProteinType}(seq_type, μ, π, R, P, Q, params)
 end
 
 """
-    create_model(::Type{LGModel}, μ::Float64)
+    create_model(::Type{LGModel}, μ::Float64; normalize::Bool=false)
 
 Create an LG (Le-Gascuel) protein evolution model with specified rate scaling factor μ.
 Returns a `Model{ProteinType}` with empirical substitution rates and frequencies.
@@ -51,11 +67,23 @@ DOI: 10.1093/molbev/msn067
 
 # Arguments
 - `μ::Float64`: Rate scaling factor (must be positive)
+- `normalize::Bool=false`: If true, normalize Q so expected substitutions per unit time = 1
 
 # Returns
 - `Model{ProteinType}`: Configured LG model
+
+# Example
+```julia
+# Create normalized LG model for antibody analysis
+model = create_model(LGModel, 1.0, normalize=true)
+
+# Compute evolutionary distance between antibody sequences
+seq1 = aa"EVQLVESGGGLVQPGGSLRLSCAAS"
+seq2 = aa"EVQLVESGGGLVQPGRSLRLSCAAS"
+logL = sequence_likelihood(model, seq1, seq2, 0.05)
+```
 """
-function create_model(::Type{LGModel}, μ::Float64)
+function create_model(::Type{LGModel}, μ::Float64; normalize::Bool=false)
     μ > 0 || throw(ArgumentError("μ must be positive"))
 
     seq_type = ProteinType()
@@ -64,7 +92,12 @@ function create_model(::Type{LGModel}, μ::Float64)
 
     P = Diagonal(π)
     Q = compute_q_matrix(R, P)
-    params = Dict{Symbol,Any}(:model => "LG")
+    
+    if normalize
+        normalize_rate_matrix!(Q, π)
+    end
+    
+    params = Dict{Symbol,Any}(:model => "LG", :normalized => normalize)
 
     Model{ProteinType}(seq_type, μ, π, R, P, Q, params)
 end
@@ -113,6 +146,9 @@ function load_empirical_data(filepath::String)
     return S_data, π
 end
 
+# Data directory path (resolved at package load time)
+const DATA_DIR = joinpath(@__DIR__, "..", "data")
+
 """
     load_wag_rates()
 
@@ -126,7 +162,7 @@ Whelan & Goldman (2001). DOI: 10.1093/oxfordjournals.molbev.a003851
 - `Matrix{Float64}`: 20×20 symmetric rate matrix
 """
 function load_wag_rates()
-    S, _ = load_empirical_data("../data/WAG.dat")
+    S, _ = load_empirical_data(joinpath(DATA_DIR, "WAG.dat"))
     return S
 end
 
@@ -143,7 +179,7 @@ Whelan & Goldman (2001). DOI: 10.1093/oxfordjournals.molbev.a003851
 - `Vector{Float64}`: Vector of 20 equilibrium frequencies
 """
 function load_wag_frequencies()
-    _, π = load_empirical_data("../data/WAG.dat")
+    _, π = load_empirical_data(joinpath(DATA_DIR, "WAG.dat"))
     return π
 end
 
@@ -160,7 +196,7 @@ Le & Gascuel (2008). DOI: 10.1093/molbev/msn067
 - `Matrix{Float64}`: 20×20 symmetric rate matrix
 """
 function load_lg_rates()
-    S, _ = load_empirical_data("../data/LG.dat")
+    S, _ = load_empirical_data(joinpath(DATA_DIR, "LG.dat"))
     return S
 end
 
@@ -177,6 +213,6 @@ Le & Gascuel (2008). DOI: 10.1093/molbev/msn067
 - `Vector{Float64}`: Vector of 20 equilibrium frequencies
 """
 function load_lg_frequencies()
-    _, π = load_empirical_data("../data/LG.dat")
+    _, π = load_empirical_data(joinpath(DATA_DIR, "LG.dat"))
     return π
 end

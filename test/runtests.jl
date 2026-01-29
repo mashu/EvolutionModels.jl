@@ -12,6 +12,8 @@ using Optim
 is_symmetric_off_diagonal(matrix) = all(matrix[i, j] ≈ matrix[j, i]
     for i in 1:size(matrix, 1), j in 1:size(matrix, 2) if i != j)
 
+import EvolutionModels: expected_substitution_rate
+
 @testset verbose=true "EvolutionModels.jl" begin
     @testset "Types" begin
         @test length(DNAType()) == 4
@@ -136,6 +138,55 @@ is_symmetric_off_diagonal(matrix) = all(matrix[i, j] ≈ matrix[j, i]
             @test issymmetric(model.R)
             @test all(isapprox.(sum(model.Q, dims=2), 0.0, atol=1e-14))
             @test is_symmetric_off_diagonal(model.Q ./ model.π')
+        end
+    end
+
+    @testset "Normalization" begin
+        @testset "JC69 Normalized" begin
+            model = create_model(JC69Model, 1.0, normalize=true)
+            rate = expected_substitution_rate(model.Q, model.π)
+            @test isapprox(rate, 1.0, atol=1e-10)
+        end
+
+        @testset "HKY85 Normalized" begin
+            π = [0.3, 0.2, 0.2, 0.3]
+            model = create_model(HKY85Model, 1.0, π, 2.0, normalize=true)
+            rate = expected_substitution_rate(model.Q, model.π)
+            @test isapprox(rate, 1.0, atol=1e-10)
+        end
+
+        @testset "GTR Normalized" begin
+            π = [0.3, 0.2, 0.2, 0.3]
+            rates = [0.0 1.0 2.0 1.0;
+                    1.0 0.0 1.0 2.0;
+                    2.0 1.0 0.0 1.0;
+                    1.0 2.0 1.0 0.0]
+            model = create_model(GTRModel, 1.0, π, rates, normalize=true)
+            rate = expected_substitution_rate(model.Q, model.π)
+            @test isapprox(rate, 1.0, atol=1e-10)
+        end
+
+        @testset "WAG Normalized" begin
+            model = create_model(WAGModel, 1.0, normalize=true)
+            rate = expected_substitution_rate(model.Q, model.π)
+            @test isapprox(rate, 1.0, atol=1e-10)
+        end
+
+        @testset "LG Normalized" begin
+            model = create_model(LGModel, 1.0, normalize=true)
+            rate = expected_substitution_rate(model.Q, model.π)
+            @test isapprox(rate, 1.0, atol=1e-10)
+        end
+
+        @testset "Non-normalized rates differ" begin
+            model_norm = create_model(JC69Model, 1.0, normalize=true)
+            model_raw = create_model(JC69Model, 1.0, normalize=false)
+            
+            rate_norm = expected_substitution_rate(model_norm.Q, model_norm.π)
+            rate_raw = expected_substitution_rate(model_raw.Q, model_raw.π)
+            
+            @test isapprox(rate_norm, 1.0, atol=1e-10)
+            @test rate_raw ≈ 0.75  # 3μ/4 for JC69 with μ=1
         end
     end
 

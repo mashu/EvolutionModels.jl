@@ -45,3 +45,48 @@ function compute_q_matrix(R::Matrix{Float64}, P::Diagonal{Float64})
     end
     Q
 end
+
+"""
+    normalize_rate_matrix!(Q::Matrix{Float64}, π::Vector{Float64})
+
+Normalize the rate matrix Q in-place so that the expected number of 
+substitutions per unit time equals 1.
+
+The normalization factor is β = -∑ᵢ πᵢ Qᵢᵢ, and Q is divided by β.
+
+# Arguments
+- `Q::Matrix{Float64}`: Rate matrix to normalize (modified in-place)
+- `π::Vector{Float64}`: Stationary frequencies
+
+# Returns
+- `Float64`: The normalization factor β used
+"""
+function normalize_rate_matrix!(Q::Matrix{Float64}, π::Vector{Float64})
+    β = -sum(π[i] * Q[i,i] for i in 1:length(π))
+    if β > 0
+        Q ./= β
+    end
+    return β
+end
+
+"""
+    expected_substitution_rate(Q::Matrix{Float64}, π::Vector{Float64}) -> Float64
+
+Compute the expected number of substitutions per unit time for a rate matrix Q
+with stationary distribution π.
+
+# Formula
+```math
+\\beta = -\\sum_i \\pi_i Q_{ii}
+```
+
+# Arguments
+- `Q::Matrix{Float64}`: Rate matrix
+- `π::Vector{Float64}`: Stationary frequencies
+
+# Returns
+- `Float64`: Expected substitutions per unit time
+"""
+function expected_substitution_rate(Q::Matrix{Float64}, π::Vector{Float64})
+    return -sum(π[i] * Q[i,i] for i in 1:length(π))
+end

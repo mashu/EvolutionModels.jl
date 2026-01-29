@@ -119,24 +119,29 @@ end
     sequence_likelihood(model::Model, seq1::Union{LongDNA{4},LongAA}, 
                        seq2::Union{LongDNA{4},LongAA}, t::Float64) -> Float64
 
-Compute the log-likelihood of evolving from sequence1 to sequence2 in time t
-under the given evolutionary model.
+Compute the conditional log-probability of observing sequence2 given sequence1 
+evolved for time t under the given evolutionary model.
 
-The likelihood is computed as:
+This function computes:
 ```math
-L = ∏ᵢ P(t)[x₁ᵢ, x₂ᵢ]
+\\log P(\\text{seq2} | \\text{seq1}, t) = \\sum_i \\log P(t)_{x_{1i}, x_{2i}}
 ```
-where P(t) is the transition probability matrix and x₁ᵢ, x₂ᵢ are the states
-at position i in sequences 1 and 2 respectively.
+where P(t) = exp(Qt) is the transition probability matrix and x₁ᵢ, x₂ᵢ are the 
+states at position i in sequences 1 and 2 respectively.
+
+Note: This is a **conditional probability**, not the full joint likelihood which 
+would include stationary frequencies: ∑ᵢ log(πₓ₁ᵢ P(t)ₓ₁ᵢ,ₓ₂ᵢ). For maximum 
+likelihood distance estimation, the stationary frequency term is constant with 
+respect to t and does not affect the optimal distance estimate.
 
 # Arguments
 - `model::Model`: Evolution model (DNA or protein)
-- `seq1::Union{LongDNA{4},LongAA}`: First sequence
-- `seq2::Union{LongDNA{4},LongAA}`: Second sequence
-- `t::Float64`: Evolution time between sequences
+- `seq1::Union{LongDNA{4},LongAA}`: Ancestral/first sequence  
+- `seq2::Union{LongDNA{4},LongAA}`: Descendant/second sequence
+- `t::Float64`: Evolution time (branch length) between sequences
 
 # Returns
-- `Float64`: Log-likelihood of the evolution from seq1 to seq2
+- `Float64`: Conditional log-probability of seq2 given seq1 and time t
 
 # Example
 ```julia
@@ -147,10 +152,13 @@ seq2 = dna"ATTG"
 
 L1 = sequence_likelihood(model, seq1, seq2, 0.1)  # Short time
 L2 = sequence_likelihood(model, seq1, seq2, 10.0)  # Long time
+# L1 > L2 because one substitution is more likely over short time
 ```
 
-Note: Only standard nucleotides/amino acids contribute to the likelihood.
-Non-standard characters (gaps, ambiguous bases) are ignored in the calculation.
+# Notes
+- Only standard nucleotides/amino acids contribute to the likelihood
+- Non-standard characters (gaps, ambiguous bases) are ignored in the calculation
+- For ML distance estimation, maximize this function over t
 """
 function sequence_likelihood(
     model::Model,
