@@ -235,24 +235,167 @@ end
 
 ## Likelihood Computation
 
-### Conditional Probability
+### Conditional vs Joint Likelihood
 
-The `sequence_likelihood` function computes the conditional log-probability:
+The `sequence_likelihood` function supports two modes:
 
+**Conditional likelihood** (default):
 ```math
 \log P(\text{seq2} | \text{seq1}, t) = \sum_{k=1}^{L} \log P(t)_{x_{1k}, x_{2k}}
 ```
 
-where P(t) = exp(Qt) is the transition probability matrix.
+**Joint likelihood** (`joint=true`):
+```math
+\log P(\text{seq1}, \text{seq2} | t) = \sum_{k=1}^{L} \left[ \log \pi_{x_{1k}} + \log P(t)_{x_{1k}, x_{2k}} \right]
+```
 
 ```julia
 model = create_model(LGModel, 1.0, normalize=true)
 seq1 = aa"EVQLVESGGGLVQPGGSLRL"
 seq2 = aa"EVQLVESGGGLIQPGGSLRL"
 
-# Log-probability of seq2 given seq1 evolved for time t
-logL = sequence_likelihood(model, seq1, seq2, 0.05)
+# Conditional: P(seq2 | seq1, t)
+L_cond = sequence_likelihood(model, seq1, seq2, 0.05)
+
+# Joint: P(seq1, seq2 | t)  
+L_joint = sequence_likelihood(model, seq1, seq2, 0.05, joint=true)
 ```
+
+### When Joint Likelihood Matters
+
+#### Use Conditional (default) When:
+
+**Estimating evolutionary distance between two sequences**
+
+The stationary frequency term ∑ log(πᵢ) is constant for fixed sequences regardless of t. Therefore, finding the distance that maximizes likelihood gives the same answer whether you use conditional or joint:
+
+```julia
+# Both give the same optimal distance
+argmax_t P(seq2|seq1,t) = argmax_t P(seq1,seq2|t)
+```
+
+For distance estimation, conditional is computationally simpler and equally correct.
+
+**Comparing likelihoods at different times for the same sequence pair**
+
+If you're asking "is t=0.05 or t=0.10 more likely for these sequences?", the π term cancels out in the comparison.
+
+#### Use Joint Likelihood When:
+
+**Comparing different models**
+
+When comparing models with different stationary frequencies (e.g., LG vs WAG, or models with estimated π), the joint likelihood is required for proper comparison:
+
+```julia
+model_lg = create_model(LGModel, 1.0, normalize=true)
+model_wag = create_model(WAGModel, 1.0, normalize=true)
+
+# WRONG: Conditional doesn't account for different π
+L_lg_cond = sequence_likelihood(model_lg, seq1, seq2, 0.1)
+L_wag_cond = sequence_likelihood(model_wag, seq1, seq2, 0.1)
+
+# CORRECT: Joint includes π contribution
+L_lg_joint = sequence_likelihood(model_lg, seq1, seq2, 0.1, joint=true)
+L_wag_joint = sequence_likelihood(model_wag, seq1, seq2, 0.1, joint=true)
+
+# Model with higher joint likelihood better explains the data
+better_model = L_lg_joint > L_wag_joint ? "LG" : "WAG"
+```
+
+**Computing AIC/BIC for model selection**
+
+Information criteria require the actual likelihood, not conditional probability:
+
+```julia
+# AIC = 2k - 2ln(L) where L is the likelihood
+k = 1  # number of parameters (just distance for empirical models)
+AIC_lg = 2*k - 2*L_lg_joint
+AIC_wag = 2*k - 2*L_wag_joint
+```
+
+**Bayesian inference**
+
+Posterior probabilities require the joint likelihood:
+
+```julia
+# P(model|data) ∝ P(data|model) × P(model)
+# P(data|model) is the joint likelihood
+```
+
+**Comparing sequences with different compositions**
+
+If comparing likelihood across different sequence pairs, joint likelihood accounts for how "probable" each sequence is under the model's equilibrium:
+
+```julia
+# Sequence pair A (common amino acids)
+seq1a = aa"AAAAAAAAA"
+seq2a = aa"AAAAAAAAA"
+
+# Sequence pair B (rare amino acids)  
+seq1b = aa"WWWWWWWWW"
+seq2b = aa"WWWWWWWWW"
+
+# Conditional treats both equally (identical sequences)
+L_a_cond = sequence_likelihood(model, seq1a, seq2a, 0.01)  # High
+L_b_cond = sequence_likelihood(model, seq1b, seq2b, 0.01)  # High
+
+# Joint reflects that W is rare in natural proteins
+L_a_joint = sequence_likelihood(model, seq1a, seq2a, 0.01, joint=true)
+L_b_joint = sequence_likelihood(model, seq1b, seq2b, 0.01, joint=true)
+# L_a_joint > L_b_joint because A is more common than W
+```
+
+#### Lineage Reconstruction and Clustering
+
+For B cell lineage reconstruction or antibody clustering, use **conditional likelihood** (the default). This is what `compute_distances()` does internally.
+
+When computing pairwise distances for a distance matrix:
+1. Each pair gets its own ML distance estimate
+2. The π term doesn't affect which distance is optimal for each pair
+3. All distances are in the same units and directly comparable
+
+```julia
+# Correct approach for lineage/clustering
+model = create_model(LGModel, 1.0, normalize=true)
+result = compute_distances(model, alignment)
+D = result.distances  # Ready for tree building or clustering
+```
+
+#### Comparing Models for a Lineage
+
+If you want to ask "does LG or WAG better explain my antibody lineage?", use `alignment_likelihood` to compute total likelihood over all pairs:
+
+```julia
+using EvolutionModels
+using FASTX
+using Optim
+
+aln = read_alignment("lineage.fasta")
+
+model_lg = create_model(LGModel, 1.0, normalize=true)
+model_wag = create_model(WAGModel, 1.0, normalize=true)
+
+# Compute total joint log-likelihood for each model
+result_lg = alignment_likelihood(model_lg, aln)
+result_wag = alignment_likelihood(model_wag, aln)
+
+println("LG:  total=$(round(result_lg.total_logL, digits=2)), mean=$(round(result_lg.mean_logL, digits=2))")
+println("WAG: total=$(round(result_wag.total_logL, digits=2)), mean=$(round(result_wag.mean_logL, digits=2))")
+println("Better model: ", result_lg.total_logL > result_wag.total_logL ? "LG" : "WAG")
+```
+
+This answers "which substitution model better captures the evolutionary patterns in my antibody data?" - useful when you have lineage-specific amino acid preferences or want to validate model choice.
+
+### Summary
+
+| Question | Use | Reason |
+|----------|-----|--------|
+| "What is the evolutionary distance?" | Conditional | π doesn't affect optimal t |
+| "Distance matrix for clustering/trees?" | Conditional | Each pair optimized independently |
+| "Which model fits better?" | Joint | Must account for different π |
+| "Is this sequence pair unusual?" | Joint | Accounts for amino acid frequencies |
+| "What's the AIC/BIC?" | Joint | Information criteria need true likelihood |
+| "Posterior probability of model?" | Joint | Bayesian inference requirement |
 
 ### Maximum Likelihood Distance Estimation
 

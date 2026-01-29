@@ -281,6 +281,29 @@ import EvolutionModels: expected_substitution_rate
             @test L_identical > L_different
         end
 
+        @testset "Joint vs Conditional Likelihood" begin
+            model = create_model(LGModel, 1.0, normalize=true)
+            seq1 = aa"ARNDCQEG"
+            seq2 = aa"ARNDCQEG"
+
+            L_cond = sequence_likelihood(model, seq1, seq2, 0.1)
+            L_joint = sequence_likelihood(model, seq1, seq2, 0.1, joint=true)
+
+            # Joint includes log(π) terms, so joint = cond + Σ log(πᵢ)
+            π_contribution = sum(log(model.π[findfirst(==(aa), STANDARD_AA)]) 
+                                 for aa in seq1 if aa in STANDARD_AA)
+            @test isapprox(L_joint, L_cond + π_contribution, atol=1e-10)
+
+            # Joint likelihood should be less than conditional (π < 1)
+            @test L_joint < L_cond
+
+            # Both should decrease with time for identical sequences
+            L_cond_long = sequence_likelihood(model, seq1, seq2, 1.0)
+            L_joint_long = sequence_likelihood(model, seq1, seq2, 1.0, joint=true)
+            @test L_cond > L_cond_long
+            @test L_joint > L_joint_long
+        end
+
         # Test input validation
         @test_throws ArgumentError sequence_likelihood(
             create_model(JC69Model, 0.1),
@@ -369,6 +392,44 @@ ATCGATCG
             end
         finally
             rm(test_fasta)
+        end
+
+        @testset "alignment_likelihood" begin
+            # Create a temporary FASTA file
+            test_fasta = tempname() * ".fasta"
+            open(test_fasta, "w") do io
+                write(io, """>seq1
+ATCGATCG
+>seq2
+ATCGATCC
+>seq3
+ATCGATCT
+""")
+            end
+
+            try
+                aln = read_alignment(test_fasta)
+                model = create_model(JC69Model, 1.0, normalize=true)
+
+                # Test alignment_likelihood
+                result = alignment_likelihood(model, aln)
+                
+                @test haskey(result, :total_logL)
+                @test haskey(result, :n_pairs)
+                @test haskey(result, :mean_logL)
+                @test haskey(result, :model)
+                
+                @test result.n_pairs == 3  # 3 choose 2 = 3 pairs
+                @test result.total_logL < 0  # Log-likelihoods are negative
+                @test isapprox(result.mean_logL, result.total_logL / result.n_pairs)
+                
+                # Joint likelihood should be less than conditional
+                result_joint = alignment_likelihood(model, aln, joint=true)
+                result_cond = alignment_likelihood(model, aln, joint=false)
+                @test result_joint.total_logL < result_cond.total_logL
+            finally
+                rm(test_fasta)
+            end
         end
     end
 end

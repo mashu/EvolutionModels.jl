@@ -5,7 +5,7 @@ using BioSequences
 using Optim
 using LinearAlgebra
 
-import EvolutionModels: Model, sequence_likelihood, read_alignment, compute_distances, is_transition
+import EvolutionModels: Model, sequence_likelihood, read_alignment, compute_distances, alignment_likelihood, is_transition
 import EvolutionModels: JC69Model, HKY85Model, GTRModel
 import EvolutionModels: num_parameters, STANDARD_DNA
 export LabeledAlignment
@@ -234,6 +234,92 @@ function num_parameters(model::Model)
     else
         error("Unknown model type: $(model_name)")
     end
+end
+
+"""
+    alignment_likelihood(model::Model, aln::LabeledAlignment;
+                        joint::Bool=true, max_scale::Float64=100.0) -> NamedTuple
+
+Compute total log-likelihood over all sequence pairs in an alignment.
+
+For each pair, finds the ML distance and evaluates the likelihood at that distance.
+Useful for comparing which evolutionary model best explains the data.
+
+# Arguments
+- `model::Model`: Evolutionary model (JC69, HKY85, GTR, WAG, LG)
+- `aln::LabeledAlignment`: Aligned sequences with labels
+- `joint::Bool=true`: Use joint likelihood (recommended for model comparison)
+- `max_scale::Float64`: Maximum distance to consider (default=100.0)
+
+# Returns
+NamedTuple containing:
+- `total_logL`: Sum of log-likelihoods over all pairs
+- `n_pairs`: Number of sequence pairs
+- `mean_logL`: Average log-likelihood per pair
+- `model`: Model name
+
+# Example
+```julia
+model_lg = create_model(LGModel, 1.0, normalize=true)
+model_wag = create_model(WAGModel, 1.0, normalize=true)
+
+aln = read_alignment("sequences.fasta")
+
+result_lg = alignment_likelihood(model_lg, aln)
+result_wag = alignment_likelihood(model_wag, aln)
+
+# Higher total_logL indicates better fit
+better = result_lg.total_logL > result_wag.total_logL ? "LG" : "WAG"
+println("Better model: \$better")
+```
+"""
+function alignment_likelihood(
+    model::Model,
+    aln::LabeledAlignment;
+    joint::Bool=true,
+    max_scale::Float64=100.0
+)
+    n = length(aln.sequences)
+    model_name = get(model.params, :model, nothing)
+    total_logL = 0.0
+    n_pairs = 0
+
+    for i in 1:n
+        for j in i+1:n
+            # Find ML distance for this pair
+            function neg_ll(t::Float64)
+                if t < 0 || t > max_scale
+                    return Inf
+                end
+                try
+                    return -sequence_likelihood(model, aln.sequences[i], aln.sequences[j], t)
+                catch
+                    return Inf
+                end
+            end
+
+            res = try
+                optimize(neg_ll, 1e-10, max_scale, Brent())
+            catch
+                nothing
+            end
+
+            if res !== nothing && Optim.converged(res)
+                t_opt = Optim.minimizer(res)
+                # Evaluate likelihood at optimal distance
+                logL = sequence_likelihood(model, aln.sequences[i], aln.sequences[j], t_opt, joint=joint)
+                total_logL += logL
+                n_pairs += 1
+            end
+        end
+    end
+
+    return (
+        total_logL=total_logL,
+        n_pairs=n_pairs,
+        mean_logL=n_pairs > 0 ? total_logL / n_pairs : NaN,
+        model=model_name
+    )
 end
 
 """

@@ -117,66 +117,75 @@ end
 
 """
     sequence_likelihood(model::Model, seq1::Union{LongDNA{4},LongAA}, 
-                       seq2::Union{LongDNA{4},LongAA}, t::Float64) -> Float64
+                       seq2::Union{LongDNA{4},LongAA}, t::Float64;
+                       joint::Bool=false) -> Float64
 
-Compute the conditional log-probability of observing sequence2 given sequence1 
-evolved for time t under the given evolutionary model.
+Compute the log-probability of observing two sequences separated by evolutionary 
+time t under the given model.
 
-This function computes:
+**Conditional likelihood** (default, `joint=false`):
 ```math
 \\log P(\\text{seq2} | \\text{seq1}, t) = \\sum_i \\log P(t)_{x_{1i}, x_{2i}}
 ```
-where P(t) = exp(Qt) is the transition probability matrix and x₁ᵢ, x₂ᵢ are the 
-states at position i in sequences 1 and 2 respectively.
 
-Note: This is a **conditional probability**, not the full joint likelihood which 
-would include stationary frequencies: ∑ᵢ log(πₓ₁ᵢ P(t)ₓ₁ᵢ,ₓ₂ᵢ). For maximum 
-likelihood distance estimation, the stationary frequency term is constant with 
-respect to t and does not affect the optimal distance estimate.
+**Joint likelihood** (`joint=true`):
+```math
+\\log P(\\text{seq1}, \\text{seq2} | t) = \\sum_i \\left[ \\log \\pi_{x_{1i}} + \\log P(t)_{x_{1i}, x_{2i}} \\right]
+```
+
+where P(t) = exp(Qt) is the transition probability matrix, π is the stationary 
+distribution, and x₁ᵢ, x₂ᵢ are states at position i.
 
 # Arguments
 - `model::Model`: Evolution model (DNA or protein)
-- `seq1::Union{LongDNA{4},LongAA}`: Ancestral/first sequence  
-- `seq2::Union{LongDNA{4},LongAA}`: Descendant/second sequence
+- `seq1::Union{LongDNA{4},LongAA}`: First sequence  
+- `seq2::Union{LongDNA{4},LongAA}`: Second sequence
 - `t::Float64`: Evolution time (branch length) between sequences
+- `joint::Bool=false`: If true, compute joint likelihood including π terms
 
 # Returns
-- `Float64`: Conditional log-probability of seq2 given seq1 and time t
+- `Float64`: Log-probability (conditional or joint)
 
 # Example
 ```julia
-# Compare likelihoods for different evolution times
-model = create_model(JC69Model, 0.1)
-seq1 = dna"ATCG"
-seq2 = dna"ATTG"
+model = create_model(LGModel, 1.0, normalize=true)
+seq1 = aa"EVQLVES"
+seq2 = aa"EVQLIES"
 
-L1 = sequence_likelihood(model, seq1, seq2, 0.1)  # Short time
-L2 = sequence_likelihood(model, seq1, seq2, 10.0)  # Long time
-# L1 > L2 because one substitution is more likely over short time
+# Conditional: P(seq2 | seq1, t) - use for ML distance estimation
+L_cond = sequence_likelihood(model, seq1, seq2, 0.1)
+
+# Joint: P(seq1, seq2 | t) - use for model comparison
+L_joint = sequence_likelihood(model, seq1, seq2, 0.1, joint=true)
 ```
 
-# Notes
-- Only standard nucleotides/amino acids contribute to the likelihood
-- Non-standard characters (gaps, ambiguous bases) are ignored in the calculation
-- For ML distance estimation, maximize this function over t
+# When to use each
+- **Conditional** (`joint=false`): ML distance estimation (π doesn't affect argmax over t)
+- **Joint** (`joint=true`): Model comparison, Bayesian inference, proper likelihood values
 """
 function sequence_likelihood(
     model::Model,
     seq1::Union{LongDNA{4},LongAA},
     seq2::Union{LongDNA{4},LongAA},
-    t::Float64
+    t::Float64;
+    joint::Bool=false
 )
     length(seq1) == length(seq2) || 
         throw(ArgumentError("Sequences must be same length"))
         
     P = transition_probability_matrix(model, t)
+    π = model.π
     logL = 0.0
     
     for (x, y) in zip(seq1, seq2)
         if (x in symbols(model.seq_type)) && (y in symbols(model.seq_type))
             i = symbol_index(x, model.seq_type)
             j = symbol_index(y, model.seq_type)
-            logL += log(P[i,j])
+            if joint
+                logL += log(π[i]) + log(P[i,j])
+            else
+                logL += log(P[i,j])
+            end
         end
     end
     
